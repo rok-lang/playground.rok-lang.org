@@ -1,0 +1,21 @@
+// A struct, a method, and a trait it implements.
+
+struct Point {
+    x: f64;
+    y: f64;
+}
+
+impl Point {
+    fn len(self) -> f64 { (self.x * self.x + self.y * self.y).sqrt() }
+}
+
+impl Display for Point {
+    fn fmt(self, ref f: Formatter) throws (FmtError) {
+        try f.write_str(f"({self.x}, {self.y})")
+    }
+}
+
+fn main() {
+    let p = Point { x: 3.0, y: 4.0 };
+    println(f"{p} is {p.len()} from the origin");
+}

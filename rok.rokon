@@ -1,0 +1,4 @@
+Package {
+    name: "rok_playground",
+    version: "0.1.0",
+}

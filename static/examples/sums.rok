@@ -1,0 +1,22 @@
+// A closed sum type: `match` must cover every variant.
+
+enum Shape {
+    Circle(f64),
+    Rect { w: f64; h: f64; },
+    Dot,
+}
+
+fn area(s: Shape) -> f64 {
+    match s {
+        Shape::Circle(r) => 3.14159 * r * r,
+        Shape::Rect { w, h } => w * h,
+        Shape::Dot => 0.0,
+    }
+}
+
+fn main() {
+    let shapes = [Shape::Circle(1.0), Shape::Rect { w: 2.0, h: 3.0 }, Shape::Dot];
+    for s in shapes {
+        println(f"area = {area(s):.2}");
+    }
+}

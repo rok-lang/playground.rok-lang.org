@@ -1,0 +1,18 @@
+// A value that may be missing says so in its type: `T | none`.
+// `??` gives the default; `if let` takes the value out.
+
+fn find(xs: List<str>, key: str) -> usize | none {
+    for i in 0..xs.len() {
+        if xs[i] == key { return i; }
+    }
+    none
+}
+
+fn main() {
+    let names = ["ada", "grace", "linus"];
+    println(f"grace at {find(names, "grace") ?? 99}");
+    println(f"guido at {find(names, "guido") ?? 99}");
+    if let i: usize = find(names, "linus") {
+        println(f"found linus at {i}");
+    }
+}

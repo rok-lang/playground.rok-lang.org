@@ -1,0 +1,325 @@
+// playground.rok-lang.org: the page and its compile service.
+//
+//   POST /api/compile?opt=0|2   body: one rok source file (UTF-8, at most
+//                               64 KiB). 200: the program as a
+//                               wasm32-unknown-unknown module; 422: rokc's
+//                               diagnostics; 413 / 429 / 503 / 504.
+//   GET  /...                   static/, then the shared files of
+//                               rok-lang.org (PLAY_SITE), and /rok.mjs
+//
+// Each compile runs `rokc build --target=wasm32-unknown-unknown` in a
+// fresh directory with a clean environment, under PLAY_WRAP (a sandbox
+// command line such as bwrap's, see README.md), killed after
+// PLAY_TIMEOUT seconds. Finished modules are cached by the SHA-256 of
+// level and source, so a shared link compiles once.
+//
+// Settings come from the environment:
+//   PLAY_ADDR     127.0.0.1:8405    PLAY_ROKC    rokc
+//   PLAY_SITE     ../rok-lang.org/static
+//   PLAY_MJS      the toolchain's rok.mjs; by default, for a PLAY_ROKC
+//                 path, <its dir>/../lib/rok/targets/wasm32-unknown-unknown/
+//   PLAY_WRAP     ""                PLAY_WORK    <temp>/rok-playground
+//   PLAY_JOBS     2                 PLAY_TIMEOUT 20
+//   PLAY_RATE     30 (compiles per minute and client)
+
+mod http;
+
+use rok::std::env;
+use rok::std::fs;
+use rok::std::net;
+use rok::std::net::TcpStream;
+use rok::std::process::{Command, Stdio};
+use rok::std::thread;
+use rok::std::time::Duration;
+use rok::core::crypto::HashAlgorithm;
+use rok::std::time::SystemTime;
+use rok::core::task::time::Instant;
+use http::Request;
+
+const MAX_SOURCE: usize = 65536;
+const MAX_CONNS: i64 = 64;
+/// Cached modules kept; past it the cache starts over.
+const MAX_CACHED: usize = 256;
+
+static ACTIVE: Atomic<i64> = Atomic::new(0i64);
+static JOBS: Atomic<i64> = Atomic::new(0i64);
+static SEQ: Atomic<i64> = Atomic::new(0i64);
+
+struct Cfg {
+    addr: str;
+    rokc: str;
+    site: str;
+    mjs: str;
+    /// The sandbox command line, split at spaces when used (a `List`
+    /// would not be `Sync`, and the config goes to every thread).
+    wrap: str;
+    work: str;
+    jobs: i64;
+    timeout: u64;
+    rate: i64;
+}
+
+fn setting(k: str, dflt: str) -> str {
+    let v = try env::var(k) catch _ { "" };
+    if v.is_empty() { dflt } else { v }
+}
+
+fn words(s: str) -> List<str> {
+    let out: List<str> = List::new();
+    for w in s.split_whitespace() { out.push(w); }
+    out
+}
+
+/// The rok.mjs of the toolchain at `rokc` (a path): its wasm32 runtime's.
+fn find_mjs(rokc: str) -> str {
+    if let k: usize = rokc.rfind("/") { return rokc[:k] + "/../lib/rok/targets/wasm32-unknown-unknown/rok.mjs"; }
+    ""
+}
+
+fn load_cfg() throws -> Cfg {
+    let rokc = setting("PLAY_ROKC", "rokc");
+    let mjs = setting("PLAY_MJS", find_mjs(rokc));
+    let work = setting("PLAY_WORK", env::temp_dir().as_str() + "/rok-playground");
+    let jobs = try setting("PLAY_JOBS", "2").parse::<i64>();
+    let timeout = try setting("PLAY_TIMEOUT", "20").parse::<u64>();
+    let rate = try setting("PLAY_RATE", "30").parse::<i64>();
+    Cfg { addr: setting("PLAY_ADDR", "127.0.0.1:8405"), rokc: rokc, site: setting("PLAY_SITE", "../rok-lang.org/static"), mjs: mjs, wrap: try env::var("PLAY_WRAP") catch _ { "" }, work: work, jobs: jobs, timeout: timeout, rate: rate }
+}
+
+// ---- answers ----
+
+struct Resp {
+    status: i32;
+    headers: List<str>;
+    body: List<u8>;
+}
+
+fn text(status: i32, msg: str) -> Resp {
+    let b: List<u8> = List::new();
+    for x in msg.as_bytes() { b.push(x); }
+    Resp { status: status, headers: ["Content-Type: text/plain; charset=utf-8", "Cache-Control: no-store"], body: b }
+}
+
+fn hex(bytes: List<u8>) -> str {
+    let digits = "0123456789abcdef";
+    let out = StrBuf::new();
+    for b in bytes {
+        out.push_str(digits[(b >> 4u8) as usize:(b >> 4u8) as usize + 1]);
+        out.push_str(digits[(b & 15u8) as usize:(b & 15u8) as usize + 1]);
+    }
+    out.to_str()
+}
+
+// ---- rate limit: per client, a window of one minute ----
+
+struct Window {
+    start: i64;
+    count: i64;
+}
+
+static CLIENTS: Mutex<Dict<str, Window>> = Mutex::new(Dict::new());
+
+fn now_secs() -> i64 { try SystemTime::now().unix_seconds() catch _ { 0i64 } }
+
+fn allow(client: str, rate: i64) -> bool {
+    using g = CLIENTS.lock() {
+        // Past 4096 clients the table starts over, so it stays small.
+        if g.get().len() > 4096 { g.set(Dict::new()); }
+        let d = g.get();
+        let t = now_secs();
+        let w = d.get(client) ?? Window { start: t, count: 0i64 };
+        if t - w.start >= 60i64 { w = Window { start: t, count: 0i64 }; }
+        w.count += 1i64;
+        d.insert(client, w);
+        w.count <= rate
+    }
+}
+
+/// The client: the proxy's X-Forwarded-For (its first address) or the peer.
+fn client_of(s: TcpStream, r: Request) -> str {
+    let f = r.header("x-forwarded-for");
+    if !f.is_empty() {
+        if let k: usize = f.find(",") { return f[:k].trim(); }
+        return f.trim();
+    }
+    let a = try s.peer_addr() catch _ { return "?"; };
+    let t = f"{a}";
+    if let k: usize = t.rfind(":") { t[:k] } else { t }
+}
+
+// ---- compiling ----
+
+/// What the playground does not compile: reading files at compile time
+/// (`include_str!`, `include_bytes!`, `#[path]`, WIT imports) and raw
+/// MLIR. The sandbox is what keeps the server's files out of reach; this
+/// only says so plainly.
+fn refused(src: str) -> str | none {
+    for (word, what) in [("include_str", "include_str!"), ("include_bytes", "include_bytes!"), ("#[path", "#[path(..)]"),
+            ("wit::import", "WIT imports"), ("wit::export", "WIT exports"), ("__mlir_op", "__mlir_op"), ("__mlir_attr", "__mlir_attr")] {
+        if src.contains(word) {
+            return f"error: the playground does not compile {what}: a program here is one file and reads nothing at compile time\n";
+        }
+    }
+    none
+}
+
+/// rokc's diagnostics as the reader should see them: the work
+/// directory's paths gone, the progress lines dropped.
+fn tidy(err: str, dir: str) -> str {
+    let out = StrBuf::new();
+    for line in err.replace(dir + "/", "").lines() {
+        let t = line.trim();
+        if t.starts_with("Compiling ") || t.starts_with("Building ") || t.starts_with("Finished ") { continue; }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.to_str().trim_end() + "\n"
+}
+
+fn compile(cfg: Cfg, src: str, opt: str) -> Resp {
+    let key = hex(HashAlgorithm::Sha256.digest((opt + "\n" + src).as_bytes()));
+    let cached = cfg.work + "/cache/" + key + ".wasm";
+    if fs::exists(cached) {
+        let wasm = try fs::read(cached) catch _ { List::new() };
+        if wasm.len() > 0 { return Resp { status: 200, headers: ["Content-Type: application/wasm", "Cache-Control: no-store", "X-Rok-Cache: hit"], body: wasm }; }
+    }
+    if JOBS.fetch_add(1i64) >= cfg.jobs {
+        JOBS.fetch_sub(1i64);
+        return text(503, "The compile server is busy; try again in a moment.");
+    }
+    let r = run_rokc(cfg, src, opt, key);
+    JOBS.fetch_sub(1i64);
+    r
+}
+
+fn run_rokc(cfg: Cfg, src: str, opt: str, key: str) -> Resp {
+    let dir = f"{cfg.work}/jobs/{rok::std::process::id()}-{SEQ.fetch_add(1i64)}";
+    try fs::create_dir_all(dir) catch e { return text(500, f"work directory: {e}"); };
+    let resp = build_in(cfg, src, opt, key, dir);
+    try fs::remove_dir_all(dir) catch _ {};
+    resp
+}
+
+fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
+    try fs::write(dir + "/main.rok", src) catch e { return text(500, f"work directory: {e}"); };
+    let log = try fs::create(dir + "/rokc.log") catch e { return text(500, f"work directory: {e}"); };
+    let argv: List<str> = List::new();
+    for w in words(cfg.wrap) { argv.push(w); }
+    for a in [cfg.rokc, "build", "--target=wasm32-unknown-unknown", "-O" + opt, "--target-dir", dir + "/t", "main.rok", "-o", "main.wasm"] { argv.push(a); }
+    // A clean environment: no ROK_* / ROKC_* settings reach rokc, and
+    // its home and caches are the job's own directory.
+    let cmd = Command::new(argv[0]).args(argv[1:argv.len()].to_list()).current_dir(dir).env_clear()
+        .env("PATH", "/usr/bin:/bin").env("HOME", dir).env("TMPDIR", dir).env("ROK_HOME", dir + "/.rok")
+        .env("XDG_CACHE_HOME", dir + "/.cache").env("NO_COLOR", "1").env("ROKC_INCREMENTAL", "0")
+        .stdin(Stdio::Null).stdout(Stdio::File(log)).stderr(Stdio::File(log)).kill_on_drop(true);
+    let child = try cmd.spawn() catch e { return text(500, f"cannot start rokc: {e}"); };
+    let t0 = Instant::now();
+    let limit = (cfg.timeout as i64) * 1000i64;
+    let code = 0i32;
+    loop {
+        let st = try child.try_wait() catch e { return text(500, f"rokc: {e}"); };
+        if let s: rok::std::process::ExitStatus = st {
+            code = if s.success() { 0i32 } else { 1i32 };
+            break;
+        }
+        if t0.elapsed().as_ms() > limit {
+            try child.kill() catch _ {};
+            try child.wait() catch _ {};
+            return text(504, f"Compiling took longer than {cfg.timeout} s and was stopped.");
+        }
+        thread::sleep(Duration::ms(25));
+    }
+    let err = try fs::read_to_str(dir + "/rokc.log") catch _ { "" };
+    if code != 0 || !fs::exists(dir + "/main.wasm") {
+        return text(422, tidy(err, dir));
+    }
+    let wasm = try fs::read(dir + "/main.wasm") catch e { return text(500, f"rokc output: {e}"); };
+    try fs::create_dir_all(cfg.work + "/cache") catch _ {};
+    let n = 0usize;
+    for _ in try fs::read_dir(cfg.work + "/cache") catch _ { return text(500, "cache directory"); } { n += 1; }
+    if n >= MAX_CACHED { try fs::remove_dir_all(cfg.work + "/cache") catch _ {}; try fs::create_dir_all(cfg.work + "/cache") catch _ {}; }
+    try fs::rename(dir + "/main.wasm", cfg.work + "/cache/" + key + ".wasm") catch _ {};
+    Resp { status: 200, headers: ["Content-Type: application/wasm", "Cache-Control: no-store", "X-Rok-Cache: miss"], body: wasm }
+}
+
+// ---- routes ----
+
+/// The page's own headers: scripts and workers from here only, wasm
+/// compiled from what the API returns.
+const CSP: str = "Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'";
+
+fn file_resp(path: str) -> Resp | none {
+    let data = try fs::read(path) catch _ { return none; };
+    Resp { status: 200, headers: [f"Content-Type: {http::content_type(path)}", "Cache-Control: no-cache", CSP], body: data }
+}
+
+fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
+    let p = r.path;
+    if p == "/api/compile" {
+        if r.method != "POST" { return text(405, "POST the source to /api/compile."); }
+        if !allow(client_of(s, r), cfg.rate) { return text(429, f"More than {cfg.rate} compiles a minute; wait a little."); }
+        let opt = if r.query.contains("opt=2") { "2" } else { "0" };
+        if r.body.trim().is_empty() { return text(400, "Nothing to compile."); }
+        if let why: str = refused(r.body) { return text(422, why); }
+        return compile(cfg, r.body, opt);
+    }
+    if r.method != "GET" && r.method != "HEAD" { return text(405, "Only GET here."); }
+    if p == "/rok.mjs" && !cfg.mjs.is_empty() {
+        if let f: Resp = file_resp(cfg.mjs) { return f; }
+    }
+    let path = if p == "/" { "/index.html" } else { p };
+    for root in ["static", cfg.site] {
+        if let f: str = http::static_file(root, path) {
+            if let x: Resp = file_resp(f) { return x; }
+        }
+    }
+    text(404, "Not found.")
+}
+
+fn handle(s: TcpStream, cfg: Cfg) {
+    let t0 = Instant::now();
+    let r = try http::read_request(s, MAX_SOURCE, Duration::sec(30)) catch e {
+        try http::send(s, e.status, ["Content-Type: text/plain; charset=utf-8"], e.msg + "\n", false) catch _ {};
+        s.close();
+        return;
+    };
+    let resp = route(cfg, s, r);
+    try http::send(s, resp.status, resp.headers, resp.body, r.method == "HEAD") catch _ {};
+    s.close();
+    eprintln(f"{r.method} {r.path} {resp.status} {resp.body.len()}B {t0.elapsed().as_ms()}ms");
+}
+
+fn main() throws {
+    let cfg = try load_cfg();
+    // Without a sandbox a program could read the server's files at
+    // compile time: only this machine may ask then.
+    if cfg.wrap.is_empty() && !cfg.addr.starts_with("127.0.0.1:") && !cfg.addr.starts_with("[::1]:") && !cfg.addr.starts_with("localhost:") {
+        eprintln(f"error: PLAY_ADDR={cfg.addr} is reachable from other machines, so PLAY_WRAP must name a sandbox (scripts/sandbox.sh, see README.md)");
+        env::exit(2);
+    }
+    try fs::create_dir_all(cfg.work + "/jobs");
+    if cfg.mjs.is_empty() || !fs::exists(cfg.mjs) {
+        eprintln(f"note: no rok.mjs (PLAY_MJS): pages cannot run programs");
+    }
+    using l = try net::tcp_listen(cfg.addr) {
+        eprintln(f"playground on http://{cfg.addr}, compiling with {cfg.rokc} ({cfg.jobs} at a time, {cfg.timeout} s each)");
+        for c in l.incoming() {
+            let s = try c.get() catch e {
+                eprintln(f"accept: {e}");
+                continue;
+            };
+            if ACTIVE.fetch_add(1i64) >= MAX_CONNS {
+                ACTIVE.fetch_sub(1i64);
+                try http::send(s, 503, ["Content-Type: text/plain; charset=utf-8"], "busy\n", false) catch _ {};
+                s.close();
+                continue;
+            }
+            let t = thread::spawn(|| {
+                handle(s, cfg);
+                ACTIVE.fetch_sub(1i64);
+                0
+            });
+            t.detach();
+        }
+    }
+}

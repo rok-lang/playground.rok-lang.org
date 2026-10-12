@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rok playground</title>
+<script src="theme-init.js"></script>
+<meta name="description" content="Write rok in the browser and run it: the server compiles it to WebAssembly, your browser runs it.">
+<link rel="canonical" href="https://playground.rok-lang.org/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="rok playground">
+<meta property="og:title" content="rok playground">
+<meta property="og:description" content="Write rok in the browser and run it.">
+<meta property="og:image" content="https://rok-lang.org/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#fcfbfd" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15151b" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="play.css">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+</head>
+<body class="play" data-root="">
+<a class="skip" href="#editor">Skip to the editor</a>
+<header class="top">
+<a class="brand" href="https://rok-lang.org"><img src="logo.svg" alt="" width="28" height="28"><span>rok</span><span class="docs-tag">playground</span></a>
+<nav class="main-nav" aria-label="Main"><a href="https://docs.rok-lang.org/latest/index.html">Docs</a><a href="https://docs.rok-lang.org/latest/learn/index.html">Learn</a><a href="https://docs.rok-lang.org/latest/examples/index.html">Examples</a><a href="https://rok-lang.org/download.html">Download</a><a href="https://rokstones.io">Packages ↗</a></nav>
+<button class="theme" type="button" aria-label="Theme">◐</button>
+</header>
+<main id="content" class="pg">
+<div class="bar" role="toolbar" aria-label="Playground">
+<button class="run" type="button" id="run" aria-keyshortcuts="Control+Enter Meta+Enter">▶ Run <kbd class="key">⌘↵</kbd></button>
+<label class="pick"><span class="sr-only">Example</span><select id="example" aria-label="Example"></select></label>
+<label class="pick"><span class="sr-only">Optimization</span><select id="opt" aria-label="Optimization"><option value="0">-O0 · debug</option><option value="2">-O2 · release</option></select></label>
+<button class="ghost" type="button" id="share">⤴ Share</button>
+<span class="status" id="status" role="status" aria-live="polite">ready</span>
+</div>
+<div class="panes">
+<section class="pane ed-pane" aria-label="Source">
+<div class="pane-head"><span>main.rok</span><span class="hint">Tab indents · ⌘/Ctrl+Enter runs</span></div>
+<div class="ed">
+<ol class="gutter" aria-hidden="true"></ol>
+<div class="ed-body">
+<pre class="hl" aria-hidden="true"><code></code></pre>
+<textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="rok source" wrap="off"></textarea>
+</div>
+</div>
+</section>
+<section class="pane out-pane" aria-label="Output">
+<div class="pane-head term-bar"><i></i><i></i><i></i><span id="out-title">output</span><button class="ghost small" type="button" id="clear">clear</button></div>
+<pre class="out" id="out" tabindex="0"><span class="dim">// press ▶ Run, and the output lands here</span></pre>
+</section>
+</div>
+<p class="about">The server compiles your program with <code>rokc --target wasm32-unknown-unknown</code>; your browser runs it. Programs have no files, network or threads here (they fail with <code>Unsupported</code>), and stop after 10 seconds. Nothing you write is stored: <b>Share</b> puts the code in the link itself.</p>
+</main>
+<footer>
+<ul class="links"><li><a href="https://rok-lang.org">rok-lang.org</a></li><li><a href="https://docs.rok-lang.org">Docs</a></li><li><a href="https://github.com/rok-lang/playground">Source</a></li></ul>
+<p class="by">Made and maintained by <a href="https://daminstudio.com">DaminStudio</a></p>
+<p class="made">compiled by rokc, run by your browser</p>
+</footer>
+<script type="module" src="play.js"></script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+/* The playground: toolbar, editor and output side by side (stacked on
+   phones). Tokens and chrome come from rok-lang.org's style.css. */
+
+.pg { max-width: 1280px; margin: 0 auto; padding: var(--sp-4) var(--sp-5) var(--sp-6); }
+
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-3); }
+.bar button, .bar select { font: inherit; }
+.run {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: 0 var(--sp-5);
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-2);
+  color: var(--on-accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+.run:hover { background: var(--accent-2-deep); }
+.run:disabled { opacity: .6; cursor: progress; }
+.run .key { border-color: color-mix(in srgb, var(--on-accent) 50%, transparent); background: none; color: inherit; }
+.ghost {
+  min-height: 40px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: none;
+  color: var(--fg);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ghost:hover { border-color: var(--accent-2); color: var(--accent-2); }
+.ghost.small { min-height: 0; margin-left: var(--sp-3); padding: 0 var(--sp-2); border-color: #3a3a46; color: #9c9eab; font: 600 var(--fs-xs)/1.7 var(--mono); }
+.pick select {
+  min-height: 40px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--fg);
+}
+.status { margin-left: auto; padding: 2px var(--sp-3); border-radius: 999px; background: var(--panel); color: var(--muted); font: 600 var(--fs-xs)/1.8 var(--mono); }
+.status[data-kind="busy"] { color: var(--accent); background: var(--accent-soft); }
+.status[data-kind="ok"] { color: var(--tip); }
+.status[data-kind="bad"] { color: var(--caution); background: var(--accent-2-soft); }
+
+.panes { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--sp-3); height: min(70vh, 640px); }
+.pane { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.pane-head { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 var(--sp-4); border-bottom: 1px solid var(--line); background: var(--panel); font: 600 var(--fs-xs) var(--mono); color: var(--muted); }
+.pane-head .hint { margin-left: auto; font-weight: 500; }
+
+/* The editor: a transparent textarea over its highlighted copy. */
+.ed { display: flex; flex: 1; min-height: 0; background: var(--code-bg); }
+.gutter { margin: 0; padding: var(--sp-3) 0; min-width: 3.2em; overflow: hidden; list-style: none; counter-reset: ln; border-right: 1px solid var(--line); text-align: right; font: 0.875rem/1.6 var(--mono); color: var(--c); user-select: none; }
+.gutter li { counter-increment: ln; padding: 0 var(--sp-2); height: 1.6em; }
+.gutter li::before { content: counter(ln); }
+.gutter li.bad { background: var(--accent-2-soft); color: var(--caution); font-weight: 700; }
+.ed-body { position: relative; flex: 1; min-width: 0; }
+.ed-body .hl, .ed-body textarea {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-radius: 0;
+  font: 0.875rem/1.6 var(--mono);
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+}
+.ed-body .hl { background: none; pointer-events: none; overflow: hidden; color: var(--fg); }
+.ed-body .hl code { font: inherit; }
+.ed-body textarea { resize: none; background: transparent; color: transparent; caret-color: var(--accent-2); outline: none; }
+.ed-body textarea::selection { background: color-mix(in srgb, var(--accent-2) 25%, transparent); color: transparent; }
+.ed-pane:focus-within { border-color: var(--accent-2); }
+
+/* The output: a terminal, as on the home page. */
+.out-pane { border-color: #2b2b35; background: #1c1c24; }
+.out-pane .pane-head { border-color: #2b2b35; background: #1c1c24; color: #9c9eab; }
+.out-pane .term-bar i { width: 11px; height: 11px; border-radius: 50%; background: #f9a8d4; }
+.out-pane .term-bar i + i { background: #7dd3fc; }
+.out-pane .term-bar i + i + i { background: #3a3a46; }
+.out-pane .term-bar span { margin-left: auto; }
+.out { flex: 1; min-height: 0; margin: 0; padding: var(--sp-3) var(--sp-4); border: 0; border-radius: 0; overflow: auto; background: none; color: #e6e5ec; font: 0.875rem/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.out .dim { color: #85838f; }
+.out .err { color: #ef8478; }
+.out .warn { color: #e0b057; }
+.out .ok { color: #6fcf97; }
+
+.about { max-width: 46rem; margin: var(--sp-4) 0 0; color: var(--muted); font-size: var(--fs-sm); }
+
+@media (max-width: 860px) {
+  .pg { padding: var(--sp-3) var(--sp-4) var(--sp-5); }
+  .panes { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .ed-pane { height: 46vh; }
+  .out-pane { height: 34vh; }
+  .bar { gap: 6px; }
+  .run, .ghost, .pick select { min-height: 38px; font-size: var(--fs-sm); }
+  .run { padding: 0 var(--sp-4); }
+  .pick select { padding: 0 var(--sp-2); max-width: 11rem; }
+  .pane-head .hint { display: none; }
+  .status { margin-left: 0; }
+  .run .key { display: none; }
+}

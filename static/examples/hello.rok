@@ -1,0 +1,10 @@
+// Welcome to the rok playground!
+// Edit the code, then press ▶ Run (or ⌘/Ctrl+Enter).
+
+fn main() {
+    let name = "rok";
+    println(f"Hello, {name}!");
+    for i in 1..=3 {
+        println(f"{i} * {i} = {i * i}");
+    }
+}
