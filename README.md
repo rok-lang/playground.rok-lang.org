@@ -43,28 +43,42 @@ Environment variables:
 
 ## Deploy (Linux)
 
-rokc reads any file it can reach at compile time (`include_str!`, `include_bytes!`, `#[path]`, WIT imports) and can put it in the module it returns, and a program can make it use a lot of memory. The server refuses those features up front, but the sandbox is what keeps the machine's files out of reach:
+rokc reads any file it can reach at compile time (`include_str!`, `include_bytes!`, `#[path]`, WIT imports) and can put it in the module it returns, and a program can make it use a lot of memory. The server refuses those features up front, but the sandbox is what keeps the machine's files out of reach. There are two; pick one for `PLAY_WRAP`.
 
-- `scripts/sandbox.sh` runs each compile under bubblewrap: only the job directory (writable), the toolchain and `/usr` (read-only), a fresh `/proc` and a `/dev` with only `null`. No `/etc`, no home directories, no network, no other processes. It also sets prlimit caps on CPU time, address space and file size.
-- Real memory needs a cgroup cap: run the service with `MemoryMax`.
-- Put a TLS reverse proxy in front that sets `X-Forwarded-For`.
+### Docker (recommended, the way play.rust-lang.org runs rustc)
+
+Each compile runs rokc in a throwaway container: the job directory is the only writable mount, there is no network, the root is read-only, and Docker's cgroup caps memory and CPUs. The host is never mounted, so a program can read only the container's own files (a plain Debian plus the public toolchain) and never the server's.
+
+```sh
+# Unpack a Linux release archive, then build the image from it:
+docker build -t rok-playground:0.1.0   --build-arg TOOLCHAIN=rok-0.1.0-x86_64-unknown-linux-gnu   -f scripts/Dockerfile <dir holding the unpacked rok-0.1.0-x86_64-unknown-linux-gnu/>
+```
+
+`PLAY_IMAGE`, `PLAY_MEM` (default `4g`) and `PLAY_CPUS` (default `2`) tune it. `PLAY_ROKC` can be any rokc the server can find for the pre-flight; the image's own rokc does the build. The service user must be able to run `docker`.
 
 ```ini
 # /etc/systemd/system/rok-playground.service
 [Service]
 User=rokplay
+SupplementaryGroups=docker
 WorkingDirectory=/srv/playground
 Environment=PLAY_ADDR=127.0.0.1:8405
 Environment=PLAY_ROKC=/srv/rok/toolchains/0.1.0-x86_64-unknown-linux-gnu/bin/rokc
-Environment=PLAY_WRAP=/srv/playground/scripts/sandbox.sh
+Environment=PLAY_WRAP=/srv/playground/scripts/docker-sandbox.sh
 Environment=PLAY_SITE=/srv/rok-lang.org/static
 ExecStart=/srv/playground/target/release/rok_playground
-MemoryMax=6G
-TasksMax=512
 Restart=on-failure
 ```
 
-Checked on Ubuntu 26.04 aarch64 (bubblewrap 0.11): reading `/etc/passwd`, a home directory, `../` or `/dev/zero` from `include_str!` fails with "no such file", and a program builds and runs.
+Put a TLS reverse proxy in front that sets `X-Forwarded-For`.
+
+### bubblewrap (lighter, no daemon)
+
+`scripts/sandbox.sh` runs each compile under bubblewrap: only the job directory (writable), the toolchain and `/usr` (read-only), a fresh `/proc` and a `/dev` with only `null`. No `/etc`, no home directories, no network, no other processes, with prlimit caps on CPU time, address space and file size. Real memory still needs a cgroup cap, so run the service with `MemoryMax=6G`. Set `PLAY_WRAP=/srv/playground/scripts/sandbox.sh`.
+
+### Checked
+
+On Ubuntu 26.04 aarch64, both sandboxes: a normal program builds and runs; `include_str!` of a host file (`../`, a home directory, a secret) reports "no such file"; `/dev/zero` is killed by the memory cap; the container has no network.
 
 ## Layout
 
@@ -73,4 +87,5 @@ Checked on Ubuntu 26.04 aarch64 (bubblewrap 0.11): reading `/etc/passwd`, a home
 | `src/main.rok` | Settings, the compile API (job directory, sandbox, time limit, cache, rate limit), static files |
 | `src/http.rok` | HTTP/1.1, the same code as rokstones.io's `src/http.rok` |
 | `static/` | `index.html`, `play.js` (editor, highlighting, share links), `run.js` (the worker), `play.css`, `examples/*.rok` |
-| `scripts/sandbox.sh` | The bubblewrap sandbox for one compile |
+| `scripts/Dockerfile`, `scripts/docker-sandbox.sh` | The Docker sandbox for one compile (recommended) |
+| `scripts/sandbox.sh` | The bubblewrap sandbox, an alternative |
