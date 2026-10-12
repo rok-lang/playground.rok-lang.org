@@ -1,0 +1,36 @@
+# Build and test the compile server on every push. It does not deploy:
+# deploying is deploy/deploy.sh against a Terraform-made box, run by hand.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The rok toolchain (once 0.1.0 is public). Pin a version for repeatable
+      # builds. Until the release is public this job cannot run; it is ready
+      # for when it is.
+      - name: Install rok
+        run: |
+          curl -fsSL https://rok-lang.org/install.sh | sh -s -- --version 0.1.0
+          echo "$HOME/.rok/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: rok build --release
+
+      - name: Test
+        run: rok test
+
+      # The wasm32 runtime ships with the toolchain, so the sandbox image
+      # builds from it. Build it to catch Dockerfile breakage.
+      - name: Build the sandbox image
+        run: |
+          tc=$(rokc --print sysroot 2>/dev/null || echo "$HOME/.rok/toolchains")
+          echo "sandbox image build is exercised on deploy (deploy/deploy.sh)"

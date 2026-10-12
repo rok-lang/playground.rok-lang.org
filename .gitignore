@@ -1,3 +1,9 @@
 target/
 public/
 .env
+
+# Terraform
+deploy/terraform/.terraform/
+deploy/terraform/*.tfstate
+deploy/terraform/*.tfstate.*
+deploy/terraform/.terraform.tfstate.lock.info
