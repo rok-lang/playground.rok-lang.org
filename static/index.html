@@ -38,7 +38,7 @@
 </div>
 <div class="panes">
 <section class="pane ed-pane" aria-label="Source">
-<div class="pane-head"><span>main.rok</span><span class="hint">Tab indents · ⌘/Ctrl+Enter runs</span></div>
+<div class="pane-head"><span>main.rok</span><span class="hint">Auto-indent · ⌘/Ctrl+Enter runs</span></div>
 <div class="ed">
 <ol class="gutter" aria-hidden="true"></ol>
 <div class="ed-body">
@@ -49,10 +49,10 @@
 </section>
 <section class="pane out-pane" aria-label="Output">
 <div class="pane-head term-bar"><i></i><i></i><i></i><span id="out-title">output</span><button class="ghost small" type="button" id="clear">clear</button></div>
-<pre class="out" id="out" tabindex="0"><span class="dim">// press ▶ Run, and the output lands here</span></pre>
+<pre class="out" id="out" tabindex="0" aria-live="polite"><span class="dim">// press ▶ Run, and the output lands here</span></pre>
 </section>
 </div>
-<p class="about">The server compiles your program with <code>rokc --target wasm32-unknown-unknown</code>; your browser runs it. Programs have no files, network or threads here (they fail with <code>Unsupported</code>), and stop after 10 seconds. Nothing you write is stored: <b>Share</b> puts the code in the link itself.</p>
+<p class="about">The server compiles your program with <code>rokc --target wasm32-unknown-unknown</code>; your browser runs it. There are no files, network or threads here, so those calls fail at run time, and a run stops after 10 seconds. Nothing you write is stored: <b>Share</b> puts the code in the link itself.</p>
 </main>
 <footer>
 <ul class="links"><li><a href="https://rok-lang.org">rok-lang.org</a></li><li><a href="https://docs.rok-lang.org">Docs</a></li><li><a href="https://github.com/rok-lang/playground">Source</a></li></ul>

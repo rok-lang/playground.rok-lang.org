@@ -21,6 +21,10 @@
 //   PLAY_WRAP     ""                PLAY_WORK    <temp>/rok-playground
 //   PLAY_JOBS     2                 PLAY_TIMEOUT 20
 //   PLAY_RATE     30 (compiles per minute and client)
+//   PLAY_CLIENT_HEADER  (none)  the header a trusted proxy sets with the
+//                 real client IP, e.g. cf-connecting-ip behind Cloudflare
+//                 or x-forwarded-for behind Caddy. Unset (the default),
+//                 the TCP peer is the client, so a client cannot forge it.
 
 mod http;
 
@@ -40,6 +44,11 @@ const MAX_SOURCE: usize = 65536;
 const MAX_CONNS: i64 = 64;
 /// Cached modules kept; past it the cache starts over.
 const MAX_CACHED: usize = 256;
+/// The most diagnostics text a 422 returns (bytes); past it, truncated.
+const MAX_DIAG: usize = 65536;
+/// The most a returned module may be (bytes); a 64 KiB source cannot
+/// honestly produce more, so a larger output is refused.
+const MAX_WASM: u64 = 33554432u64;
 
 static ACTIVE: Atomic<i64> = Atomic::new(0i64);
 static JOBS: Atomic<i64> = Atomic::new(0i64);
@@ -57,6 +66,7 @@ struct Cfg {
     jobs: i64;
     timeout: u64;
     rate: i64;
+    client_header: str;
 }
 
 fn setting(k: str, dflt: str) -> str {
@@ -83,7 +93,7 @@ fn load_cfg() throws -> Cfg {
     let jobs = try setting("PLAY_JOBS", "2").parse::<i64>();
     let timeout = try setting("PLAY_TIMEOUT", "20").parse::<u64>();
     let rate = try setting("PLAY_RATE", "30").parse::<i64>();
-    Cfg { addr: setting("PLAY_ADDR", "127.0.0.1:8405"), rokc: rokc, site: setting("PLAY_SITE", "../rok-lang.org/static"), mjs: mjs, wrap: try env::var("PLAY_WRAP") catch _ { "" }, work: work, jobs: jobs, timeout: timeout, rate: rate }
+    Cfg { addr: setting("PLAY_ADDR", "127.0.0.1:8405"), rokc: rokc, site: setting("PLAY_SITE", "../rok-lang.org/static"), mjs: mjs, wrap: try env::var("PLAY_WRAP") catch _ { "" }, work: work, jobs: jobs, timeout: timeout, rate: rate, client_header: setting("PLAY_CLIENT_HEADER", "").to_lowercase() }
 }
 
 // ---- answers ----
@@ -123,10 +133,18 @@ fn now_secs() -> i64 { try SystemTime::now().unix_seconds() catch _ { 0i64 } }
 
 fn allow(client: str, rate: i64) -> bool {
     using g = CLIENTS.lock() {
-        // Past 4096 clients the table starts over, so it stays small.
-        if g.get().len() > 4096 { g.set(Dict::new()); }
         let d = g.get();
         let t = now_secs();
+        // Drop windows older than the minute so the table stays small,
+        // without resetting everyone (which an attacker could force).
+        if d.len() > 2048 {
+            let keep: Dict<str, Window> = Dict::new();
+            for (k, w) in d.entries() {
+                if t - w.start < 60i64 { keep.insert(k, w); }
+            }
+            d = keep;
+            g.set(d);
+        }
         let w = d.get(client) ?? Window { start: t, count: 0i64 };
         if t - w.start >= 60i64 { w = Window { start: t, count: 0i64 }; }
         w.count += 1i64;
@@ -136,11 +154,18 @@ fn allow(client: str, rate: i64) -> bool {
 }
 
 /// The client: the proxy's X-Forwarded-For (its first address) or the peer.
-fn client_of(s: TcpStream, r: Request) -> str {
-    let f = r.header("x-forwarded-for");
-    if !f.is_empty() {
-        if let k: usize = f.find(",") { return f[:k].trim(); }
-        return f.trim();
+/// The client for rate limiting. Without a trusted-proxy header the TCP
+/// peer is used, so a client cannot forge its identity; a direct client's
+/// own X-Forwarded-For is ignored. With one (PLAY_CLIENT_HEADER), its
+/// value is trusted, taking the LAST entry of a list header, which is the
+/// one the proxy appended (a client may prepend fakes, not append).
+fn client_of(s: TcpStream, r: Request, header: str) -> str {
+    if !header.is_empty() {
+        let v = r.header(header);
+        if !v.is_empty() {
+            if let k: usize = v.rfind(",") { return v[k + 1:].trim(); }
+            return v.trim();
+        }
     }
     let a = try s.peer_addr() catch _ { return "?"; };
     let t = f"{a}";
@@ -231,8 +256,14 @@ fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
     }
     let err = try fs::read_to_str(dir + "/rokc.log") catch _ { "" };
     if code != 0 || !fs::exists(dir + "/main.wasm") {
-        return text(422, tidy(err, dir));
+        let diag = tidy(err, dir);
+        return text(422, if diag.len() > MAX_DIAG { diag[:MAX_DIAG] + "\n... (truncated)\n" } else { diag });
     }
+    let md = try fs::symlink_metadata(dir + "/main.wasm") catch e { return text(500, f"rokc output: {e}"); };
+    // The compile runs as this same user in a writable job dir; never
+    // follow a planted symlink, and never ship an implausibly large module.
+    if !md.is_file() { return text(422, "the build did not produce a module\n"); }
+    if md.len() > MAX_WASM { return text(422, "the module is too large\n"); }
     let wasm = try fs::read(dir + "/main.wasm") catch e { return text(500, f"rokc output: {e}"); };
     try fs::create_dir_all(cfg.work + "/cache") catch _ {};
     let n = 0usize;
@@ -246,7 +277,7 @@ fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
 
 /// The page's own headers: scripts and workers from here only, wasm
 /// compiled from what the API returns.
-const CSP: str = "Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'";
+const CSP: str = "Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 
 fn file_resp(path: str) -> Resp | none {
     let data = try fs::read(path) catch _ { return none; };
@@ -257,7 +288,7 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
     let p = r.path;
     if p == "/api/compile" {
         if r.method != "POST" { return text(405, "POST the source to /api/compile."); }
-        if !allow(client_of(s, r), cfg.rate) { return text(429, f"More than {cfg.rate} compiles a minute; wait a little."); }
+        if !allow(client_of(s, r, cfg.client_header), cfg.rate) { return text(429, f"More than {cfg.rate} compiles a minute; wait a little."); }
         let opt = if r.query.contains("opt=2") { "2" } else { "0" };
         if r.body.trim().is_empty() { return text(400, "Nothing to compile."); }
         if let why: str = refused(r.body) { return text(422, why); }
@@ -278,7 +309,7 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
 
 fn handle(s: TcpStream, cfg: Cfg) {
     let t0 = Instant::now();
-    let r = try http::read_request(s, MAX_SOURCE, Duration::sec(30)) catch e {
+    let r = try http::read_request(s, MAX_SOURCE, Duration::sec(10)) catch e {
         try http::send(s, e.status, ["Content-Type: text/plain; charset=utf-8"], e.msg + "\n", false) catch _ {};
         s.close();
         return;

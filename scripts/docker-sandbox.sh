@@ -6,8 +6,9 @@
 #
 # The host rokc path is ignored; the image's own rokc runs. The job
 # directory is the only writable mount, there is no network, the root is
-# read-only, and Docker's cgroup caps memory (so no OOM of the host) and
-# CPUs. Build the image first (scripts/Dockerfile). Set PLAY_IMAGE,
+# read-only, and Docker's cgroup caps memory (so the container, not the
+# host, is OOM-killed) and CPUs. No IPC namespace, a capped open-file
+# count, and a small no-exec /tmp. Build the image first (scripts/Dockerfile). Set PLAY_IMAGE,
 # PLAY_MEM, PLAY_CPUS to override.
 set -eu
 
@@ -17,9 +18,11 @@ job=$(pwd)
 
 exec docker run --rm \
   --network none \
+  --ipc none \
   --memory "${PLAY_MEM:-4g}" --memory-swap "${PLAY_MEM:-4g}" \
   --cpus "${PLAY_CPUS:-2}" --pids-limit 128 \
-  --read-only --tmpfs /tmp:size=256m,exec \
+  --ulimit nofile=512:512 --ulimit fsize=67108864 \
+  --read-only --tmpfs /tmp:size=64m \
   --cap-drop ALL --security-opt no-new-privileges \
   --user "$(id -u):$(id -g)" \
   --env HOME=/job --env TMPDIR=/job \

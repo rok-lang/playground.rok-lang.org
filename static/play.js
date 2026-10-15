@@ -56,11 +56,75 @@ function sync() {
 
 ed.addEventListener("input", () => { marks.clear(); paint(); save(); });
 ed.addEventListener("scroll", sync);
+// A code-editor keystroke: what to do (or null to leave it to the
+// textarea). The handler applies it with execCommand so undo still works.
+const PAIRS = { "{": "}", "(": ")", "[": "]" };
+function editAction(v, s, e, key, shift) {
+  const lineStart = v.lastIndexOf("\n", s - 1) + 1;
+  const indent = (v.slice(lineStart, s).match(/^[ \t]*/) || [""])[0];
+  const before = v[s - 1], after = v[s];
+
+  if (key === "Enter" && !shift && s === e) {
+    if (before === "{" && after === "}") {
+      return { insert: "\n" + indent + "    \n" + indent, caret: 1 + indent.length + 4 };
+    }
+    const add = "{([".includes(before) ? "    " : "";
+    return { insert: "\n" + indent + add, caret: 1 + indent.length + add.length };
+  }
+
+  if (key === "Tab") {
+    if (s === e && !shift) return { insert: "    ", caret: 4 };
+    const ls = lineStart;
+    let le = v.indexOf("\n", e > s ? e - 1 : e);
+    if (le === -1) le = v.length;
+    const out = v.slice(ls, le).split("\n").map((ln) => {
+      if (shift) {
+        if (ln.startsWith("    ")) return ln.slice(4);
+        if (ln.startsWith("\t")) return ln.slice(1);
+        return ln.replace(/^ {1,3}/, "");
+      }
+      return ln === "" ? ln : "    " + ln;
+    }).join("\n");
+    return { replace: [ls, le], text: out, sel: [ls, ls + out.length] };
+  }
+
+  if (s === e) {
+    if (PAIRS[key]) {
+      if (!after || /[\s)\]},;]/.test(after)) return { insert: key + PAIRS[key], caret: 1 };
+      return null;
+    }
+    if (key === '"') {
+      if (after === '"') return { caret: s + 1 };
+      if (!after || /[\s)\]},;]/.test(after)) return { insert: '""', caret: 1 };
+      return null;
+    }
+    if ((key === "}" || key === ")" || key === "]") && after === key) return { caret: s + 1 };
+    if (key === "Backspace" && (PAIRS[before] === after || (before === '"' && after === '"'))) {
+      return { del: [s - 1, s + 1] };
+    }
+  }
+  return null;
+}
+
 ed.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") { ev.preventDefault(); run(); return; }
-  if (ev.key === "Tab" && !ev.shiftKey && !ev.altKey) {
-    ev.preventDefault();
-    document.execCommand("insertText", false, "    ");
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const a = editAction(ed.value, ed.selectionStart, ed.selectionEnd, ev.key, ev.shiftKey);
+  if (!a) return;
+  ev.preventDefault();
+  const s = ed.selectionStart;
+  if (a.insert !== undefined) {
+    document.execCommand("insertText", false, a.insert);
+    ed.setSelectionRange(s + a.caret, s + a.caret);
+  } else if (a.replace) {
+    ed.setSelectionRange(a.replace[0], a.replace[1]);
+    document.execCommand("insertText", false, a.text);
+    ed.setSelectionRange(a.sel[0], a.sel[1]);
+  } else if (a.del) {
+    ed.setSelectionRange(a.del[0], a.del[1]);
+    document.execCommand("delete");
+  } else if (a.caret !== undefined) {
+    ed.setSelectionRange(a.caret, a.caret);
   }
 });
 
@@ -92,8 +156,23 @@ async function pack(text) {
   return b64(new Uint8Array(await new Response(s).arrayBuffer()));
 }
 async function unpack(code) {
-  const s = new Blob([unb64(code)]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Response(s).text();
+  // Read the decompressed bytes with a cap, so a crafted link cannot
+  // decompression-bomb the editor. The real source limit is 64 KiB.
+  const LIMIT = 262144;
+  const r = new Blob([unb64(code)]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+  const parts = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await r.read();
+    if (done) break;
+    total += value.length;
+    if (total > LIMIT) { await r.cancel(); throw new Error("too large"); }
+    parts.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) { buf.set(p, at); at += p.length; }
+  return new TextDecoder().decode(buf);
 }
 function save() {
   if (pick.value && ed.value !== pick.dataset.text) pick.value = "";
@@ -191,6 +270,10 @@ async function run() {
   worker.postMessage(wasm, [wasm]);
 }
 runBtn.addEventListener("click", run);
+
+// The Run shortcut glyph: ⌘ on a Mac, Ctrl elsewhere.
+const runKey = document.querySelector("#run .key");
+if (runKey && !/Mac|iPhone|iPad/.test(navigator.platform)) runKey.textContent = "Ctrl↵";
 
 // ---- start: the link's code, else the last session's, else hello ----
 
