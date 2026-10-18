@@ -180,7 +180,8 @@ function save() {
 }
 
 $("share").addEventListener("click", async () => {
-  const url = `${location.origin}${location.pathname}#code=${await pack(ed.value)}`;
+  const q = opt.value !== "0" ? `&opt=${opt.value}` : "";
+  const url = `${location.origin}${location.pathname}#code=${await pack(ed.value)}${q}`;
   history.replaceState(null, "", url);
   try {
     await navigator.clipboard.writeText(url);
@@ -202,8 +203,16 @@ function print(text, cls) {
   span.textContent = text;
   out.append(span);
   out.scrollTop = out.scrollHeight;
+  $("copy-out").disabled = false;
 }
-$("clear").addEventListener("click", () => out.replaceChildren());
+$("clear").addEventListener("click", () => { out.replaceChildren(); $("copy-out").disabled = true; });
+
+// Copy the output, and download the compiled module.
+$("copy-out").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(out.innerText); say("output copied ✓", "ok"); }
+  catch { say("copy failed", "bad"); }
+});
+
 
 // Diagnostics: each `--> main.rok:<line>:<col>` marks that line.
 function showErrors(text) {
@@ -278,6 +287,8 @@ if (runKey && !/Mac|iPhone|iPad/.test(navigator.platform)) runKey.textContent = 
 // ---- start: the link's code, else the last session's, else hello ----
 
 (async () => {
+  const om = location.hash.match(/[#&]opt=([02])/);
+  if (om) opt.value = om[1];
   const m = location.hash.match(/^#code=([\w-]+)/);
   let text = null;
   if (m) { try { text = await unpack(m[1]); } catch { say("the link's code is damaged", "bad"); } }
@@ -292,6 +303,43 @@ if (runKey && !/Mac|iPhone|iPad/.test(navigator.platform)) runKey.textContent = 
   }
   ed.focus();
 })();
+
+// A draggable divider resizes the editor vs the output (desktop only).
+const divider = document.querySelector(".divider");
+const panes = document.querySelector(".panes");
+if (divider && panes) {
+  const SPLIT_KEY = "play.split";
+  const apply = (pct) => panes.style.setProperty("--split", Math.max(25, Math.min(75, pct)) + "%");
+  try { const v = localStorage.getItem(SPLIT_KEY); if (v) apply(parseFloat(v)); } catch {}
+  const pctAt = (clientX) => {
+    const r = panes.getBoundingClientRect();
+    return ((clientX - r.left) / r.width) * 100;
+  };
+  const save = () => {
+    const cur = panes.style.getPropertyValue("--split");
+    try { if (cur) localStorage.setItem(SPLIT_KEY, parseFloat(cur)); } catch {}
+  };
+  divider.addEventListener("pointerdown", (ev) => {
+    if (matchMedia("(max-width: 860px)").matches) return;
+    ev.preventDefault();
+    divider.setPointerCapture(ev.pointerId);
+    panes.classList.add("dragging");
+    const move = (e) => apply(pctAt(e.clientX));
+    const up = () => {
+      divider.removeEventListener("pointermove", move);
+      divider.removeEventListener("pointerup", up);
+      panes.classList.remove("dragging");
+      save();
+    };
+    divider.addEventListener("pointermove", move);
+    divider.addEventListener("pointerup", up);
+  });
+  divider.addEventListener("keydown", (ev) => {
+    const cur = parseFloat(panes.style.getPropertyValue("--split")) || 55;
+    if (ev.key === "ArrowLeft") { ev.preventDefault(); apply(cur - 3); save(); }
+    else if (ev.key === "ArrowRight") { ev.preventDefault(); apply(cur + 3); save(); }
+  });
+}
 
 // The theme button, as on the other rok sites.
 const tb = document.querySelector(".theme");
