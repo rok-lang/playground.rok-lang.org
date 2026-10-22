@@ -32,7 +32,9 @@
   cursor: pointer;
 }
 .ghost:hover { border-color: var(--accent-2); color: var(--accent-2); }
-.ghost.small { min-height: 0; margin-left: var(--sp-3); padding: 0 var(--sp-2); border-color: #3a3a46; color: #9c9eab; font: 600 var(--fs-xs)/1.7 var(--mono); }
+.ghost.small { min-height: 0; padding: 0 var(--sp-2); border-color: #3a3a46; color: #9c9eab; font: 600 var(--fs-xs)/1.7 var(--mono); }
+/* A hair more space before the first tool, after the "output" label. */
+#out-title + .ghost.small { margin-left: var(--sp-1); }
 .pick { position: relative; }
 .pick select {
   min-height: 40px;
@@ -60,7 +62,7 @@
   pointer-events: none;
 }
 .pick:hover::after { background: var(--fg); }
-.status { margin-left: auto; padding: 2px var(--sp-3); border-radius: 999px; background: var(--panel); color: var(--muted); font: 600 var(--fs-xs)/1.8 var(--mono); }
+.status { margin-left: auto; padding: 2px var(--sp-3); border-radius: 999px; background: var(--panel); color: var(--muted); font: 600 var(--fs-xs)/1.8 var(--sans); }
 .status[data-kind="busy"] { color: var(--accent); background: var(--accent-soft); }
 .status[data-kind="ok"] { color: var(--tip); }
 .status[data-kind="bad"] { color: var(--caution); background: var(--accent-2-soft); }
@@ -73,7 +75,7 @@
 .panes.dragging { cursor: col-resize; user-select: none; }
 .pane { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
 .pane-head { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 var(--sp-4); border-bottom: 1px solid var(--line); background: var(--panel); font: 600 var(--fs-xs) var(--mono); color: var(--muted); }
-.pane-head .hint { margin-left: auto; font-weight: 500; }
+.pane-head .hint { margin-left: auto; font-family: var(--sans); font-weight: 500; }
 
 /* The editor: a transparent textarea over its highlighted copy. */
 .ed { display: flex; flex: 1; min-height: 0; background: var(--code-bg); }

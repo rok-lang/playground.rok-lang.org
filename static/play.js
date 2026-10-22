@@ -235,7 +235,7 @@ async function run() {
   marks.clear();
   paint();
   runBtn.disabled = true;
-  say("compiling…", "busy");
+  say("compiling...", "busy");
   const t0 = performance.now();
   let res;
   try {
