@@ -47,7 +47,7 @@
   appearance: none;
   -webkit-appearance: none;
 }
-/* A chevron in the text colour, a sensible gap from the edge. */
+/* A chevron in the text color, a sensible gap from the edge. */
 .pick::after {
   content: "";
   position: absolute;
