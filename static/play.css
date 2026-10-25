@@ -131,3 +131,24 @@
   .status { margin-left: 0; }
   .run .key { display: none; }
 }
+
+/* Footer — kept in sync with rok-lang.org's style.css. */
+footer {
+  padding: var(--sp-6) var(--sp-5);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+footer p { margin: var(--sp-1) 0; text-wrap: balance; }
+footer a { display: inline-block; padding: 2px 0; }
+footer .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 var(--sp-3); margin: 0 0 var(--sp-2); padding: 0; list-style: none; }
+footer .links li:not(:last-child)::after { content: "·"; margin-left: var(--sp-3); color: var(--line-strong); }
+footer .social { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2); margin: 0 0 var(--sp-2); padding: 0; list-style: none; }
+footer .social a { color: var(--muted); padding: 6px; line-height: 0; }
+footer .social a:hover { color: var(--accent); }
+footer .ico { width: 20px; height: 20px; fill: currentColor; }
+footer .made { font-family: var(--mono); font-size: var(--fs-xs); }
+footer .made::before { content: "// "; color: var(--accent-2); }
+footer .by { margin: var(--sp-3) 0 var(--sp-1); }
+footer .by a { font-weight: 600; }
