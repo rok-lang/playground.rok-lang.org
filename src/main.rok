@@ -230,7 +230,7 @@ fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
     let log = try fs::create(dir + "/rokc.log") catch e { return text(500, f"work directory: {e}"); };
     let argv: List<str> = List::new();
     for w in words(cfg.wrap) { argv.push(w); }
-    for a in [cfg.rokc, "build", "--target=wasm32-unknown-unknown", "-O" + opt, "--target-dir", dir + "/t", "main.rok", "-o", "main.wasm"] { argv.push(a); }
+    for a in [cfg.rokc, "build", "--target=wasm32-unknown-unknown", "-O" + opt, "--target-dir", "t", "main.rok", "-o", "main.wasm"] { argv.push(a); }
     // A clean environment: no ROK_* / ROKC_* settings reach rokc, and
     // its home and caches are the job's own directory.
     let cmd = Command::new(argv[0]).args(argv[1:argv.len()].to_list()).current_dir(dir).env_clear()
