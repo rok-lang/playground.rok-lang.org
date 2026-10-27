@@ -4,8 +4,8 @@
 # own LLVM and linker and ships the C library for each target, so nothing
 # else is needed to build for wasm32-unknown-unknown.
 #
-#   docker build -t rok-playground:0.1.0 \
-#     --build-arg TOOLCHAIN=rok-0.1.0-x86_64-unknown-linux-gnu \
+#   docker build -t rok-playground:<version> \
+#     --build-arg TOOLCHAIN=rok-<version>-x86_64-unknown-linux-gnu \
 #     -f scripts/Dockerfile <dir holding the unpacked toolchain>
 FROM debian:bookworm-slim
 ARG TOOLCHAIN

@@ -10,10 +10,6 @@ on:
 
 jobs:
   build:
-    # The rok toolchain is not installable until 0.1.0 is public, so this job
-    # is skipped until then: set the repository variable ROK_PUBLIC=on at
-    # launch to turn it on.
-    if: ${{ vars.ROK_PUBLIC == 'on' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +17,7 @@ jobs:
       # The rok toolchain. Pin a version for repeatable builds.
       - name: Install rok
         run: |
-          curl -fsSL https://rok-lang.org/install.sh | sh -s -- --version 0.1.0
+          curl -fsSL https://rok-lang.org/install.sh | sh -s -- --version 0.1.1
           echo "$HOME/.rok/bin" >> "$GITHUB_PATH"
 
       - name: Build
