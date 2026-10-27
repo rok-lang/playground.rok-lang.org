@@ -27,4 +27,4 @@ exec docker run --rm \
   --user "$(id -u):$(id -g)" \
   --env HOME=/job --env TMPDIR=/job \
   --volume "$job":/job --workdir /job \
-  "${PLAY_IMAGE:-rok-playground:0.1.0}" "$@"
+  "${PLAY_IMAGE:-rok-playground:current}" "$@"

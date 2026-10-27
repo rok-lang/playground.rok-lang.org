@@ -12,7 +12,7 @@ Needs a Rok toolchain with the `wasm32-unknown-unknown` runtime (release archive
 
 ```bash
 rok build
-PLAY_ROKC=~/.rok/toolchains/0.1.0-aarch64-apple-darwin/bin/rokc ./target/debug/rok_playground
+PLAY_ROKC=~/.rok/toolchains/<version>-aarch64-apple-darwin/bin/rokc ./target/debug/rok_playground
 # http://127.0.0.1:8405
 ```
 
@@ -43,8 +43,8 @@ rokc can read any file it reaches at compile time, so a sandbox is what keeps th
 - Docker (recommended): `scripts/docker-sandbox.sh` runs each compile in a throwaway container with the job directory as the only writable mount, no network, read-only root, and cgroup memory/CPU caps. Build the image from an unpacked Linux release archive:
 
 ```sh
-docker build -t rok-playground:0.1.0 \
-  --build-arg TOOLCHAIN=rok-0.1.0-x86_64-unknown-linux-gnu \
+docker build -t rok-playground:current \
+  --build-arg TOOLCHAIN=rok-<version>-x86_64-unknown-linux-gnu \
   -f scripts/Dockerfile <dir holding the unpacked toolchain>
 ```
 
