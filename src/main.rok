@@ -276,8 +276,8 @@ fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
 // ---- routes ----
 
 /// The page's own headers: scripts and workers from here only, wasm
-/// compiled from what the API returns.
-const CSP: str = "Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+/// compiled from what the API returns, fonts from Google Fonts and jsDelivr.
+const CSP: str = "Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 
 fn file_resp(path: str) -> Resp | none {
     let data = try fs::read(path) catch _ { return none; };
