@@ -1,0 +1,14 @@
+# Deploy what lands on the release branch (rok-lang/.github deploy.yml).
+name: deploy
+
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    uses: rok-lang/.github/.github/workflows/deploy.yml@main
+    with:
+      site: playground
+    secrets: inherit
