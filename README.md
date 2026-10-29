@@ -48,7 +48,7 @@ docker build -t rok-playground:current \
   -f scripts/Dockerfile <dir holding the unpacked toolchain>
 ```
 
-Tune with `PLAY_IMAGE`, `PLAY_MEM` (default `4g`), `PLAY_CPUS` (default `2`); the service user must run `docker`. See `scripts/` for the systemd unit shape. Put a TLS reverse proxy in front that sets `X-Forwarded-For`.
+Tune with `PLAY_IMAGE`, `PLAY_MEM` (default `4g`), `PLAY_CPUS` (default `2`); the service user must run `docker`. Put a TLS reverse proxy in front that sets `X-Forwarded-For`.
 
 - bubblewrap (lighter, no daemon): `scripts/sandbox.sh` runs each compile under bwrap with only the job directory writable, no network, and prlimit caps. Real memory still needs a cgroup cap, so run the service with `MemoryMax=6G`.
 

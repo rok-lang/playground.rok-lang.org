@@ -9,8 +9,7 @@ builds rok to wasm in a sandbox. See the README for running it locally.
 rok build --release    # the compile server
 ```
 
-The static assets are in `static/`; the sandbox and deploy scripts are in
-`scripts/` and `deploy/`.
+The static assets are in `static/`; the sandbox scripts are in `scripts/`.
 
 ## Submitting
 
