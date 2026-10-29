@@ -138,6 +138,12 @@
 .prose{display:flex;flex-direction:column;gap:18px;max-width:700px}
 .prose h2{margin-top:22px}
 
+/* social links: brand icons, labelled */
+.social{display:flex;gap:2px;align-items:center}
+.social a{display:inline-flex;padding:6px;border-radius:6px;color:var(--ink-3);line-height:0}
+.social a:hover{color:var(--ink);background:var(--bg-2)}
+.social svg{width:18px;height:18px;fill:currentColor}
+
 /* data */
 .kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:10px 18px;font-size:14px;line-height:20px}
 .kv dt{color:var(--ink-3)}.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
