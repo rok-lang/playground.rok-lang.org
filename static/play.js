@@ -11,8 +11,12 @@ const status = $("status");
 const runBtn = $("run");
 const pick = $("example");
 const opt = $("opt");
+const sqs = document.querySelector(".sqs");
+const tip = $("tip");
+const pos = $("pos");
+const diagBtn = $("diag");
 
-// ---- highlighting (the classes of rok-syntax: k t s n c a) ----
+// Highlighting, with the classes of rok-syntax: k t s n c a.
 
 const KEYWORDS = new Set(("fn let mut if else match for in while loop return break continue struct enum trait impl " +
   "pub use mod const static type as is none true false throws try catch async await yield self Self where ref " +
@@ -36,26 +40,146 @@ function highlight(src) {
   return html + esc(src.slice(last)) + "\n";
 }
 
-let marks = new Set();
-function paint() {
-  hl.innerHTML = highlight(ed.value);
-  const n = ed.value.split("\n").length;
-  if (gutter.childElementCount !== n || marks.size) {
-    gutter.replaceChildren(...Array.from({ length: n }, (_, k) => {
-      const li = document.createElement("li");
-      if (marks.has(k + 1)) li.className = "bad";
-      return li;
-    }));
-  }
-}
-function sync() {
-  hl.parentElement.scrollTop = ed.scrollTop;
-  hl.parentElement.scrollLeft = ed.scrollLeft;
-  gutter.scrollTop = ed.scrollTop;
+// The last failed compile's diagnostics that point into main.rok:
+// { warn, head, notes, line, col, len }. Cleared on the next edit.
+let diags = [];
+
+// The underline layer: the source in transparent ink, each diagnostic's
+// span wrapped so only its wavy underline shows.
+function underlines(src) {
+  const lines = src.split("\n");
+  const byLine = new Map();
+  for (const d of diags) if (d.line) (byLine.get(d.line) || byLine.set(d.line, []).get(d.line)).push(d);
+  return lines.map((ln, i) => {
+    const ds = byLine.get(i + 1);
+    if (!ds) return esc(ln);
+    const d = ds[0];
+    const a = Math.min(d.col - 1, ln.length), b = Math.min(a + Math.max(d.len, 1), Math.max(ln.length, a + 1));
+    const span = ln.slice(a, b) || " ";
+    return esc(ln.slice(0, a)) + `<span class="sq${d.warn ? " w" : ""}">${esc(span)}</span>` + esc(ln.slice(b));
+  }).join("\n") + "\n";
 }
 
-ed.addEventListener("input", () => { marks.clear(); paint(); save(); });
+function paint() {
+  hl.innerHTML = highlight(ed.value);
+  sqs.innerHTML = diags.length ? underlines(ed.value) : "";
+  const n = ed.value.split("\n").length;
+  if (gutter.childElementCount !== n || gutter.dataset.marked || diags.length) {
+    const bad = new Map(diags.filter((d) => d.line).map((d) => [d.line, d.warn ? "warn" : "bad"]));
+    gutter.replaceChildren(...Array.from({ length: n }, (_, k) => {
+      const li = document.createElement("li");
+      if (bad.has(k + 1)) li.className = bad.get(k + 1);
+      return li;
+    }));
+    if (bad.size) gutter.dataset.marked = "1"; else delete gutter.dataset.marked;
+  }
+  showDiagCount();
+}
+function sync() {
+  for (const el of [hl.parentElement, sqs]) { el.scrollTop = ed.scrollTop; el.scrollLeft = ed.scrollLeft; }
+  gutter.scrollTop = ed.scrollTop;
+  hideTip();
+}
+
+ed.addEventListener("input", () => { diags = []; hideTip(); paint(); save(); });
 ed.addEventListener("scroll", sync);
+
+// Caret position, diagnostics count, and the diagnostic tooltip.
+
+function caretAt(i) {
+  const before = ed.value.slice(0, i);
+  const line = before.split("\n").length;
+  return { line, col: i - before.lastIndexOf("\n") };
+}
+function showPos() {
+  const { line, col } = caretAt(ed.selectionStart);
+  pos.textContent = `Ln ${line}, Col ${col}`;
+  const d = diags.find((x) => x.line === line);
+  if (d && document.activeElement === ed) showTip(d); else if (!hovering) hideTip();
+}
+document.addEventListener("selectionchange", () => { if (document.activeElement === ed) showPos(); });
+ed.addEventListener("blur", () => { if (!hovering) hideTip(); });
+
+function showDiagCount() {
+  const errs = diags.filter((d) => !d.warn).length, warns = diags.length - errs;
+  const parts = [];
+  if (errs) parts.push(`${errs} error${errs > 1 ? "s" : ""}`);
+  if (warns) parts.push(`${warns} warning${warns > 1 ? "s" : ""}`);
+  diagBtn.hidden = !parts.length;
+  diagBtn.textContent = parts.join(", ");
+  diagBtn.classList.toggle("w", !errs && warns > 0);
+  diagBtn.title = diags.some((d) => d.line) ? "Go to the first one" : "";
+}
+// The count jumps to the first diagnostic with a place in the source.
+diagBtn.addEventListener("click", () => {
+  const d = diags.find((x) => x.line);
+  if (!d) return;
+  const lines = ed.value.split("\n");
+  let i = 0;
+  for (let k = 0; k < d.line - 1 && k < lines.length; k++) i += lines[k].length + 1;
+  i += Math.min(d.col - 1, (lines[d.line - 1] || "").length);
+  ed.focus();
+  ed.setSelectionRange(i, i);
+  const lh = parseFloat(getComputedStyle(ed).lineHeight);
+  ed.scrollTop = Math.max(0, (d.line - 4) * lh);
+  showPos();
+});
+
+// One monospace cell, measured once the fonts are in.
+let cell = 0;
+function cellWidth() {
+  if (cell) return cell;
+  const probe = document.createElement("span");
+  probe.textContent = "0".repeat(40);
+  sqs.append(probe);
+  cell = probe.getBoundingClientRect().width / 40;
+  probe.remove();
+  return cell;
+}
+document.fonts && document.fonts.ready.then(() => { cell = 0; });
+
+function showTip(d) {
+  tip.replaceChildren();
+  const head = document.createElement("span");
+  head.className = "h" + (d.warn ? " w" : "");
+  const b = document.createElement("b");
+  b.textContent = d.kind;
+  head.append(b, d.head ? `: ${d.head}` : "");
+  tip.append(head);
+  for (const [k, text] of d.notes) {
+    const n = document.createElement("span");
+    n.className = "n";
+    const nb = document.createElement("b");
+    nb.textContent = k;
+    n.append(nb, `: ${text}`);
+    tip.append(n);
+  }
+  const cs = getComputedStyle(ed);
+  const lh = parseFloat(cs.lineHeight), padT = parseFloat(cs.paddingTop), padL = parseFloat(cs.paddingLeft);
+  tip.hidden = false;
+  const box = ed.parentElement.getBoundingClientRect();
+  let left = padL + (d.col - 1) * cellWidth() - ed.scrollLeft - 12;
+  left = Math.max(8, Math.min(left, box.width - tip.offsetWidth - 8));
+  let top = padT + d.line * lh - ed.scrollTop + 6;
+  if (top + tip.offsetHeight > box.height - 8) top = padT + (d.line - 1) * lh - ed.scrollTop - tip.offsetHeight - 6;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+function hideTip() { tip.hidden = true; }
+
+// Hovering the underlined span shows its diagnostic too.
+let hovering = false;
+ed.addEventListener("mousemove", (ev) => {
+  if (!diags.length) return;
+  const cs = getComputedStyle(ed);
+  const lh = parseFloat(cs.lineHeight);
+  const line = Math.floor((ev.offsetY + ed.scrollTop - parseFloat(cs.paddingTop)) / lh) + 1;
+  const col = Math.floor((ev.offsetX + ed.scrollLeft - parseFloat(cs.paddingLeft)) / cellWidth()) + 1;
+  const d = diags.find((x) => x.line === line && col >= x.col && col < x.col + Math.max(x.len, 1));
+  hovering = !!d;
+  if (d) showTip(d); else if (!(document.activeElement === ed && diags.some((x) => x.line === caretAt(ed.selectionStart).line))) hideTip();
+});
+ed.addEventListener("mouseleave", () => { hovering = false; if (document.activeElement !== ed) hideTip(); else showPos(); });
 // A code-editor keystroke: what to do (or null to leave it to the
 // textarea). The handler applies it with execCommand so undo still works.
 const PAIRS = { "{": "}", "(": ")", "[": "]" };
@@ -128,26 +252,25 @@ ed.addEventListener("keydown", (ev) => {
   }
 });
 
-// ---- examples ----
 
 const EXAMPLES = [
   ["hello", "Hello, world"], ["sums", "Sum types and match"], ["none", "T | none and ??"],
   ["errors", "throws, try, catch"], ["iter", "Lists, closures, iterators"], ["structs", "Structs and traits"],
 ];
 for (const [file, label] of EXAMPLES) pick.append(new Option(label, file));
-pick.append(new Option("(your code)", ""));
+pick.append(new Option("Your code", ""));
 
 async function loadExample(file) {
   const r = await fetch(`examples/${file}.rok`);
   ed.value = await r.text();
   pick.dataset.text = ed.value;
-  marks.clear();
+  diags = [];
   paint();
   save();
 }
 pick.addEventListener("change", () => { if (pick.value) loadExample(pick.value); });
 
-// ---- the code in the link, and in this browser between visits ----
+// The code in the link, and in this browser between visits.
 
 const b64 = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
@@ -179,19 +302,22 @@ function save() {
   try { localStorage.setItem("play.code", ed.value); } catch {}
 }
 
+
 $("share").addEventListener("click", async () => {
   const q = opt.value !== "0" ? `&opt=${opt.value}` : "";
   const url = `${location.origin}${location.pathname}#code=${await pack(ed.value)}${q}`;
   history.replaceState(null, "", url);
+  const btn = $("share");
   try {
     await navigator.clipboard.writeText(url);
-    say("link copied ✓", "ok");
+    btn.textContent = "Link copied";
   } catch {
-    say("link in the address bar", "ok");
+    btn.textContent = "Link in the address bar";
   }
+  clearTimeout(btn.reset);
+  btn.reset = setTimeout(() => { btn.textContent = "Share"; }, 2000);
 });
 
-// ---- output ----
 
 function say(text, kind) {
   status.textContent = text;
@@ -205,86 +331,147 @@ function print(text, cls) {
   out.scrollTop = out.scrollHeight;
   $("copy-out").disabled = false;
 }
-$("clear").addEventListener("click", () => { out.replaceChildren(); $("copy-out").disabled = true; });
+// A cargo-style progress line: a right-aligned verb, then the rest.
+function step(verb, rest) {
+  print(verb.padStart(12) + " ", "v");
+  print(rest + "\n");
+}
+$("clear").addEventListener("click", () => { out.replaceChildren(); $("copy-out").disabled = true; say(""); });
 
-// Copy the output, and download the compiled module.
 $("copy-out").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(out.innerText); say("output copied ✓", "ok"); }
-  catch { say("copy failed", "bad"); }
+  const btn = $("copy-out");
+  try { await navigator.clipboard.writeText(out.innerText); btn.textContent = "Copied"; }
+  catch { btn.textContent = "Copy failed"; }
+  clearTimeout(btn.reset);
+  btn.reset = setTimeout(() => { btn.textContent = "Copy"; }, 2000);
 });
 
-
-// Diagnostics: each `--> main.rok:<line>:<col>` marks that line.
-function showErrors(text) {
-  marks = new Set([...text.matchAll(/--> [^:\n]+:(\d+):\d+/g)].map((m) => +m[1]));
-  paint();
+// rokc's diagnostics: each `error[..]: msg` / `warning: msg` block, its
+// `--> main.rok:<line>:<col>`, the caret run under the code, and its
+// `= note:` / `= help:` lines.
+function parseDiags(text) {
+  const found = [];
+  let d = null;
   for (const line of text.split("\n")) {
-    const cls = /^error/.test(line) ? "err" : /^warning/.test(line) ? "warn" : /^\s*(\||-->|=|\d+ \|)/.test(line) ? "dim" : "";
-    print(line + "\n", cls);
+    let m;
+    if ((m = line.match(/^(error|warning)(\[\w+\])?: (.*)$/))) {
+      d = { kind: m[1] + (m[2] || ""), warn: m[1] === "warning", head: m[3], notes: [], line: 0, col: 0, len: 1 };
+      found.push(d);
+    } else if (!d) {
+      continue;
+    } else if ((m = line.match(/^\s*--> main\.rok:(\d+):(\d+)/)) && !d.line) {
+      d.line = +m[1];
+      d.col = +m[2];
+    } else if ((m = line.match(/^\s*\|\s*(\^+)\s*(.*)$/)) && d.len === 1) {
+      d.len = m[1].length;
+      if (m[2]) d.notes.push(["label", m[2]]);
+    } else if ((m = line.match(/^\s*= (note|help): (.*)$/))) {
+      d.notes.push([m[1], m[2]]);
+    }
+  }
+  // A caret label reads as part of the headline, not as a note.
+  for (const x of found) x.notes = x.notes.map(([k, t]) => (k === "label" ? ["here", t] : [k, t]));
+  return found;
+}
+
+// Diagnostics in the output, coloured as rokc colours them in a terminal.
+function showErrors(text) {
+  diags = parseDiags(text);
+  paint();
+  for (const line of text.replace(/\n+$/, "").split("\n")) {
+    let m;
+    if ((m = line.match(/^(error|warning)(\[\w+\])?(:.*)$/))) {
+      print(m[1] + (m[2] || ""), m[1] === "error" ? "e" : "w");
+      print(m[3] + "\n");
+    } else if ((m = line.match(/^(\s*)(-->|=|\d* ?\|)(.*)$/))) {
+      print(m[1]);
+      print(m[2], "g");
+      const caret = m[3].match(/^(\s*)(\^+)(.*)$/);
+      if (caret) { print(caret[1]); print(caret[2], diags.some((d) => !d.warn) ? "e" : "w"); print(caret[3] + "\n"); }
+      else print(m[3] + "\n");
+    } else {
+      print(line + "\n");
+    }
   }
 }
 
-// ---- run ----
 
 let worker = null;
 const LIMIT = 10_000;
+const secs = (ms) => `${(ms / 1000).toFixed(2)} s`;
 
 async function run() {
   if (worker) { worker.terminate(); worker = null; }
   out.replaceChildren();
-  marks.clear();
+  diags = [];
+  hideTip();
   paint();
-  runBtn.disabled = true;
-  say("compiling...", "busy");
+  runBtn.setAttribute("aria-busy", "true");
+  const done = () => runBtn.removeAttribute("aria-busy");
+  say("compiling…");
+  step("Compiling", `main.rok (wasm32, -O${opt.value})`);
   const t0 = performance.now();
   let res;
   try {
     res = await fetch(`api/compile?opt=${opt.value}`, { method: "POST", body: ed.value, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   } catch {
-    runBtn.disabled = false;
+    done();
     say("offline", "bad");
     print("cannot reach the compile server\n", "err");
     return;
   }
-  const took = res.headers.get("X-Rok-Cache") === "hit" ? "cached" : `${((performance.now() - t0) / 1000).toFixed(1)}s`;
+  const cached = res.headers.get("X-Rok-Cache") === "hit";
+  const took = performance.now() - t0;
   if (!res.ok) {
-    runBtn.disabled = false;
+    done();
     const text = await res.text();
-    if (res.status === 422) { say(`errors · ${took}`, "bad"); showErrors(text); }
-    else { say(`${res.status}`, "bad"); print(text + "\n", "err"); }
+    if (res.status === 422) {
+      showErrors(text);
+      const n = diags.filter((d) => !d.warn).length;
+      say(n ? `${n} error${n > 1 ? "s" : ""}` : "failed", "bad");
+    } else {
+      say(`HTTP ${res.status}`, "bad");
+      print(text.replace(/\n*$/, "\n"), "err");
+    }
     return;
   }
   const wasm = await res.arrayBuffer();
-  say(`running · compiled ${took === "cached" ? "(cached)" : "in " + took}`, "busy");
+  step("Finished", cached ? "cached build" : `in ${secs(took)}`);
+  step("Running", "main.wasm");
+  print("\n");
+  say("running…");
   const t1 = performance.now();
   worker = new Worker("run.js", { type: "module" });
   const stop = setTimeout(() => {
     worker.terminate();
     worker = null;
-    runBtn.disabled = false;
-    print(`\n⏱ stopped after ${LIMIT / 1000} s\n`, "warn");
-    say("stopped", "bad");
+    done();
+    print(`\nstopped after ${LIMIT / 1000} s\n`, "warn");
+    say("stopped · 10 s limit", "bad");
   }, LIMIT);
   worker.onmessage = ({ data }) => {
     if (data.text !== undefined) { print(data.text, data.fd === 2 ? "err" : ""); return; }
     clearTimeout(stop);
     worker.terminate();
     worker = null;
-    runBtn.disabled = false;
-    const ms = Math.round(performance.now() - t1);
+    done();
+    const ms = performance.now() - t1;
     if (data.error) { print(`\n${data.error}\n`, "err"); say("crashed", "bad"); return; }
-    print(`\n▸ exit ${data.code} · ran in ${ms} ms\n`, data.code === 0 ? "ok" : "warn");
-    say(data.code === 0 ? `done · ${took} + ${ms} ms` : `exit ${data.code}`, data.code === 0 ? "ok" : "bad");
+    if (data.code !== 0) print(`\nexit code ${data.code}\n`, "warn");
+    say(`exit ${data.code} · ${secs(ms)}`, data.code === 0 ? "" : "bad");
   };
   worker.postMessage(wasm, [wasm]);
 }
 runBtn.addEventListener("click", run);
+document.addEventListener("keydown", (ev) => {
+  if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter" && ev.target !== ed) { ev.preventDefault(); run(); }
+});
 
 // The Run shortcut glyph: ⌘ on a Mac, Ctrl elsewhere.
-const runKey = document.querySelector("#run .key");
+const runKey = document.querySelector("#run .kbd");
 if (runKey && !/Mac|iPhone|iPad/.test(navigator.platform)) runKey.textContent = "Ctrl↵";
 
-// ---- start: the link's code, else the last session's, else hello ----
+// Start: the link's code, else the last session's, else hello.
 
 (async () => {
   const om = location.hash.match(/[#&]opt=([02])/);
@@ -302,11 +489,13 @@ if (runKey && !/Mac|iPhone|iPad/.test(navigator.platform)) runKey.textContent = 
     await loadExample("hello");
   }
   ed.focus();
+  ed.setSelectionRange(0, 0);
+  showPos();
 })();
 
 // A draggable divider resizes the editor vs the output (desktop only).
 const divider = document.querySelector(".divider");
-const panes = document.querySelector(".panes");
+const panes = document.querySelector(".ws");
 if (divider && panes) {
   const SPLIT_KEY = "play.split";
   const apply = (pct) => panes.style.setProperty("--split", Math.max(25, Math.min(75, pct)) + "%");
@@ -329,28 +518,39 @@ if (divider && panes) {
       divider.removeEventListener("pointermove", move);
       divider.removeEventListener("pointerup", up);
       panes.classList.remove("dragging");
+      hideTip();
       save();
     };
     divider.addEventListener("pointermove", move);
     divider.addEventListener("pointerup", up);
   });
   divider.addEventListener("keydown", (ev) => {
-    const cur = parseFloat(panes.style.getPropertyValue("--split")) || 55;
+    const cur = parseFloat(panes.style.getPropertyValue("--split")) || 60;
     if (ev.key === "ArrowLeft") { ev.preventDefault(); apply(cur - 3); save(); }
     else if (ev.key === "ArrowRight") { ev.preventDefault(); apply(cur + 3); save(); }
   });
 }
 
-// The theme button, as on the other rok sites.
-const tb = document.querySelector(".theme");
-const order = ["auto", "light", "dark"];
-const glyph = { auto: "◐", light: "☀", dark: "☾" };
+// Theme: localStorage "theme" is "light" or "dark"; absent, follow the system.
+const root = document.documentElement;
+const dark = matchMedia("(prefers-color-scheme: dark)");
 const getTheme = () => { try { return localStorage.getItem("theme") || "auto"; } catch { return "auto"; } };
-const showTheme = (t) => { tb.textContent = glyph[t]; tb.setAttribute("aria-label", `Theme: ${t}`); tb.title = `Theme: ${t}`; };
-showTheme(getTheme());
-tb.addEventListener("click", () => {
-  const t = order[(order.indexOf(getTheme()) + 1) % order.length];
+const isDark = () => root.classList.contains("dk");
+function applyTheme() {
+  const t = getTheme();
+  const d = t === "dark" || (t !== "light" && dark.matches);
+  root.classList.toggle("dk", d);
+  root.classList.toggle("lt", !d);
+  for (const b of document.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", String(b.dataset.theme === t));
+  const tb = document.querySelector(".theme");
+  tb.setAttribute("aria-label", d ? "Switch to light theme" : "Switch to dark theme");
+  tb.title = tb.getAttribute("aria-label");
+}
+function setTheme(t) {
   try { t === "auto" ? localStorage.removeItem("theme") : localStorage.setItem("theme", t); } catch {}
-  if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
-  showTheme(t);
-});
+  applyTheme();
+}
+document.querySelector(".theme").addEventListener("click", () => setTheme(isDark() ? "light" : "dark"));
+for (const b of document.querySelectorAll(".seg button")) b.addEventListener("click", () => setTheme(b.dataset.theme));
+dark.addEventListener("change", applyTheme);
+applyTheme();

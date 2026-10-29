@@ -8,7 +8,7 @@ Source for https://playground.rok-lang.org, the browser playground for Rok. The 
 
 ## Run it locally
 
-Needs a Rok toolchain with the `wasm32-unknown-unknown` runtime (release archives ship it; from source, `targets/build.sh wasm32-unknown-unknown`) and the rok-lang.org checkout next to this one for the shared stylesheet and logo.
+Needs a Rok toolchain with the `wasm32-unknown-unknown` runtime (release archives ship it; from source, `targets/build.sh wasm32-unknown-unknown`).
 
 ```bash
 rok build
@@ -27,7 +27,7 @@ Environment variables:
 | `PLAY_ADDR` | `127.0.0.1:8405` | Where to listen |
 | `PLAY_ROKC` | `rokc` | The compiler (the toolchain's own `bin/rokc`, not the proxy) |
 | `PLAY_MJS` | `<rokc dir>/../lib/rok/targets/wasm32-unknown-unknown/rok.mjs` | JS host served at `/rok.mjs` |
-| `PLAY_SITE` | `../rok-lang.org/static` | Shared stylesheet, logo, icons |
+| `PLAY_SITE` | `../rok-lang.org/static` | Fallback for static files not in `static/` |
 | `PLAY_WRAP` | (none) | Sandbox command rokc runs under (see Deploy) |
 | `PLAY_WORK` | `<temp>/rok-playground` | Job directories and module cache |
 | `PLAY_JOBS` | `2` | Compiles at a time |
@@ -58,5 +58,6 @@ Tune with `PLAY_IMAGE`, `PLAY_MEM` (default `4g`), `PLAY_CPUS` (default `2`); th
 |---|---|
 | `src/main.rok` | Settings, compile API (job dir, sandbox, time limit, cache, rate limit), static files |
 | `src/http.rok` | HTTP/1.1, the same code as rokstones.io's `src/http.rok` |
-| `static/` | `index.html`, `play.js`, `run.js` (the worker), `play.css`, `examples/*.rok` |
+| `static/` | `index.html`, `play.js`, `run.js` (the worker), `play.css`, `rok.css` (copied from rok-lang/web), `examples/*.rok`, icons, `og.png` |
+| `scripts/og.html` | Source of `static/og.png` |
 | `scripts/` | `Dockerfile` + `docker-sandbox.sh` (recommended), `sandbox.sh` (bubblewrap) |
