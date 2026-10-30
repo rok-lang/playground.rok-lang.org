@@ -16,8 +16,9 @@
 //   GET  /api/share/<id>        the stored source, or 404
 //   GET  /p/<id>                the page with that source in the editor
 //   GET  /...                   static/, then the web kit's files
-//                               (web/, built in), then PLAY_SITE, and
-//                               /rok.mjs
+//                               (web/, built in) and its fonts
+//                               (/fonts/, web/assets/fonts), then
+//                               PLAY_SITE, and /rok.mjs
 //
 // Each compile runs `rokc build --target=wasm32-unknown-unknown` in a
 // fresh directory with a clean environment, under PLAY_WRAP (a sandbox
@@ -134,14 +135,10 @@ fn load_cfg() throws -> Cfg {
 fn og_version(roots: List<str>) -> str {
     for root in roots {
         let data = try fs::read(root + "/og.png") catch _ { continue; };
-        return version(data);
+        return http::version(data);
     }
     "dev"
 }
-
-/// The first 10 hex digits of the SHA-256 of `data`: the `?v=` that
-/// names this content.
-fn version(data: List<u8>) -> str { hex(HashAlgorithm::Sha256.digest(data))[:10] }
 
 fn bytes_of(s: str) -> List<u8> {
     let b: List<u8> = List::new();
@@ -456,11 +453,11 @@ fn shared_page(cfg: Cfg, src: str) -> Resp | none {
 
 /// The page's own headers: scripts and workers from here only (and the
 /// Cloudflare Web Analytics beacon the proxy injects), wasm compiled from
-/// what the API returns, fonts from Google Fonts and jsDelivr. Style
+/// what the API returns, fonts from here (the kit's). Style
 /// attributes are allowed only because WebKit's own <select> shadow DOM
 /// uses them; an attribute cannot hold a selector, and anything it loads
 /// still meets img-src/font-src. <style> and stylesheets stay strict.
-const CSP: str = "Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; worker-src 'self'; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net; style-src-attr 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+const CSP: str = "Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; worker-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 
 fn file_resp(path: str) -> Resp | none {
     let data = try fs::read(path) catch _ { return none; };
@@ -477,12 +474,20 @@ fn kit_resp(path: str) -> Resp | none {
     Resp { status: 200, headers: [f"Content-Type: {http::content_type(name)}", "Cache-Control: no-cache", CSP], body: b }
 }
 
+/// A webfont of the kit (`/fonts/...`), from its files beside the server
+/// (kit::FONTS_DIR): they are not built in.
+fn font_resp(path: str) -> Resp | none {
+    let rest = path.strip_prefix("/fonts/") ?? { return none; };
+    if rest.ends_with(".md") { return none; }
+    file_resp(http::static_file(kit::FONTS_DIR, "/" + rest) ?? { return none; })
+}
+
 /// The pages' shared markup, from the kit's chrome: each
 /// `<!--web:name-->` placeholder replaced.
 fn fill(html: str) -> str {
     let sites = chrome::Sites { home: "https://rok-lang.org", docs: "https://docs.rok-lang.org/latest", stones: "https://rokstones.io", playground: "/", current: "playground" };
     let lost = chrome::not_found("Page not found", "There is no page at this address.", [("/", "Back to the playground")]);
-    html.replace("<!--web:theme-button-->", chrome::theme_button(false)).replace("<!--web:header-sites-->", chrome::header_sites(sites, false)).replace("<!--web:credits-->", f"<span>{chrome::LICENSE}</span> · {chrome::MADE_BY}").replace("<!--web:social-->", chrome::SOCIAL).replace("<!--web:theme-seg-->", chrome::theme_seg(false)).replace("<!--web:not-found-->", lost)
+    html.replace("<!--web:fonts-->\n", chrome::fonts_in("/", false)).replace("<!--web:theme-button-->", chrome::theme_button(false)).replace("<!--web:header-sites-->", chrome::header_sites(sites, false)).replace("<!--web:credits-->", f"<span>{chrome::LICENSE}</span> · {chrome::MADE_BY}").replace("<!--web:social-->", chrome::SOCIAL).replace("<!--web:theme-seg-->", chrome::theme_seg(false)).replace("<!--web:not-found-->", lost)
 }
 
 /// A page with the og:image version, the shared markup and the asset
@@ -501,7 +506,7 @@ fn page_resp(cfg: Cfg, path: str) -> Resp | none {
 fn stamp(cfg: Cfg, html: str) -> str {
     let out = html;
     for p in ["/rok.css", "/play.css", "/theme.js", "/play.js"] {
-        if let x: Resp = asset(cfg, p) { out = out.replace(f"\"{p}\"", f"\"{p}?v={version(x.body)}\""); }
+        if let x: Resp = asset(cfg, p) { out = out.replace(f"\"{p}\"", f"\"{p}?v={http::version(x.body)}\""); }
     }
     out
 }
@@ -512,38 +517,31 @@ fn site_file(cfg: Cfg, root: str, p: str) -> Resp | none {
     page_resp(cfg, f)
 }
 
-/// The file at public path `p`: static/, then the kit, then PLAY_SITE.
+/// The file at public path `p`: static/, then the kit and its fonts,
+/// then PLAY_SITE.
 fn asset(cfg: Cfg, p: str) -> Resp | none {
-    site_file(cfg, "static", p) ?? kit_resp(p) ?? site_file(cfg, cfg.site, p)
+    site_file(cfg, "static", p) ?? kit_resp(p) ?? font_resp(p) ?? site_file(cfg, cfg.site, p)
 }
 
-/// Whether If-None-Match value `inm` names `etag`.
-fn etag_match(inm: str, etag: str) -> bool {
-    for t in inm.split(",") {
-        let x = t.trim();
-        if x == "*" || x == etag || x == "W/" + etag { return true; }
-    }
-    false
-}
-
-/// A file answer's caching: a page for five minutes, a file asked for by
-/// its current `?v=` for a year, anything else revalidated each time;
-/// always an ETag of the content, and 304 when the client holds it.
-fn cached(x: Resp, page: bool, query: str, inm: str) -> Resp {
-    let h = hex(HashAlgorithm::Sha256.digest(x.body));
-    let etag = "\"" + h[:16] + "\"";
-    let cc = "Cache-Control: no-cache";
-    if page {
-        cc = "Cache-Control: public, max-age=300";
+/// A file answer's caching: a page for five minutes, the kit's fonts
+/// (unversioned names) for a day, a file asked for by its current `?v=`
+/// for a year, anything else revalidated each time; always an ETag of
+/// the content, and 304 when the client holds it.
+fn cached(x: Resp, page: bool, r: Request) -> Resp {
+    let tag = http::etag(x.body);
+    let cc = if page {
+        "Cache-Control: public, max-age=300"
+    } else if r.path.starts_with("/fonts/") {
+        "Cache-Control: public, max-age=86400"
+    } else if http::is_current(r.query, x.body) {
+        http::IMMUTABLE
     } else {
-        for kv in query.split("&") {
-            if kv == "v=" + h[:10] { cc = "Cache-Control: public, max-age=31536000, immutable"; }
-        }
-    }
+        http::REVALIDATE
+    };
     // headers[1] is file_resp's and kit_resp's Cache-Control.
     x.headers[1] = cc;
-    x.headers.push("ETag: " + etag);
-    if !inm.is_empty() && etag_match(inm, etag) { return Resp { status: 304, headers: [cc, "ETag: " + etag], body: List::new() }; }
+    x.headers.push("ETag: " + tag);
+    if http::not_modified(r, tag) { return Resp { status: 304, headers: [cc, "ETag: " + tag], body: List::new() }; }
     x
 }
 
@@ -575,9 +573,8 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
         let src = shared(cfg, p["/api/share/".len():]) ?? { return text(404, "No such link."); };
         return text(200, src);
     }
-    let inm = r.header("if-none-match");
     if p == "/rok.mjs" && !cfg.mjs.is_empty() {
-        if let f: Resp = file_resp(cfg.mjs) { return cached(f, false, r.query, inm); }
+        if let f: Resp = file_resp(cfg.mjs) { return cached(f, false, r); }
     }
     if let c: str = url::canonical(p) {
         return Resp { status: 301, headers: [url::moved(c, r.query), "Cache-Control: public, max-age=3600"], body: List::new() };
@@ -585,9 +582,9 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
     if p.starts_with("/p/") {
         let src = shared(cfg, p[3:]) ?? { return not_found(cfg, p); };
         let x = shared_page(cfg, src) ?? { return not_found(cfg, p); };
-        return cached(x, true, r.query, inm);
+        return cached(x, true, r);
     }
-    if let x: Resp = asset(cfg, p) { return cached(x, x.headers[0].starts_with("Content-Type: text/html"), r.query, inm); }
+    if let x: Resp = asset(cfg, p) { return cached(x, x.headers[0].starts_with("Content-Type: text/html"), r); }
     not_found(cfg, p)
 }
 
@@ -602,17 +599,6 @@ fn not_found(cfg: Cfg, p: str) -> Resp {
     text(404, "Not found.")
 }
 
-/// 304 by hand: http::send would add `Content-Length: 0`, which is not
-/// the length of the representation the client holds.
-fn not_modified(s: TcpStream, headers: List<str>) throws {
-    let h = StrBuf::new();
-    h.push_str("HTTP/1.1 304 Not Modified\r\n");
-    for x in headers { h.push_str(x + "\r\n"); }
-    h.push_str("Connection: close\r\n\r\n");
-    try s.set_write_timeout(Duration::sec(30));
-    try s.write_all(h.to_str());
-}
-
 fn handle(s: TcpStream, cfg: Cfg) {
     let t0 = Instant::now();
     let r = try http::read_request(s, MAX_SOURCE, Duration::sec(10)) catch e {
@@ -621,8 +607,8 @@ fn handle(s: TcpStream, cfg: Cfg) {
         return;
     };
     let resp = route(cfg, s, r);
-    if resp.status == 304 { try not_modified(s, resp.headers) catch _ {}; }
-    else { try http::send(s, resp.status, resp.headers, resp.body, r.method == "HEAD") catch _ {}; }
+    // http::send writes a 304 without a body or Content-Length.
+    try http::send(s, resp.status, resp.headers, resp.body, r.method == "HEAD") catch _ {};
     s.close();
     eprintln(f"{r.method} {r.path} {resp.status} {resp.body.len()}B {t0.elapsed().as_ms()}ms");
 }
@@ -714,23 +700,34 @@ fn compile_errors_are_answers() {
 #[test]
 fn caching() {
     let cfg = Cfg { addr: "127.0.0.1:0", rokc: "", site: "", mjs: "", wrap: "", work: "", jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: "", share_rate: 10, share_max: 2, og: "dev" };
+    // GET `target`, holding If-None-Match `inm` when not empty.
+    let get = |target: str, inm: str| {
+        let h = if inm.is_empty() { "" } else { "\r\nIf-None-Match: " + inm };
+        try http::parse_head(f"GET {target} HTTP/1.1\r\nHost: a{h}") catch e { panic(e.msg) }
+    };
     let page = page_resp(cfg, "static/index.html") ?? panic("no index.html");
     let js = asset(cfg, "/play.js") ?? panic("no play.js");
-    let v = version(js.body);
+    let v = http::version(js.body);
     expect(body_of(page).contains(f"src=\"/play.js?v={v}\""), "stamped play.js");
     expect(!body_of(page).contains("href=\"/rok.css\"") && !body_of(page).contains("href=\"/play.css\"") && !body_of(page).contains("src=\"/theme.js\""), "stamped css, theme.js");
-    let c = cached(asset(cfg, "/play.js") ?? panic("js"), false, f"v={v}", "");
+    let c = cached(asset(cfg, "/play.js") ?? panic("js"), false, get(f"/play.js?v={v}", ""));
     expect(c.status == 200 && c.headers.contains("Cache-Control: public, max-age=31536000, immutable"), "immutable");
     let etag = c.headers[c.headers.len() - 1];
     expect(etag.starts_with("ETag: \"") && etag.len() == 24, "etag");
-    let stale = cached(asset(cfg, "/play.js") ?? panic("js"), false, "v=0000000000", "");
+    let stale = cached(asset(cfg, "/play.js") ?? panic("js"), false, get("/play.js?v=0000000000", ""));
     expect(stale.headers.contains("Cache-Control: no-cache"), "stale version revalidates");
-    let p = cached(page, true, "", "");
+    let p = cached(page, true, get("/", ""));
     expect(p.headers.contains("Cache-Control: public, max-age=300"), "page");
     let tag = etag["ETag: ".len():];
-    let again = cached(asset(cfg, "/play.js") ?? panic("js"), false, "", "W/" + tag + ", \"x\"");
+    let again = cached(asset(cfg, "/play.js") ?? panic("js"), false, get("/play.js", "W/" + tag + ", \"x\""));
     expect(again.status == 304 && again.body.len() == 0 && again.headers.contains("ETag: " + tag), "304");
-    expect(cached(asset(cfg, "/play.js") ?? panic("js"), false, "", "\"nope\"").status == 200, "other etag");
+    expect(cached(asset(cfg, "/play.js") ?? panic("js"), false, get("/play.js", "\"nope\"")).status == 200, "other etag");
+    let font = asset(cfg, "/fonts/Geist-Variable.woff2") ?? panic("no font");
+    expect(font.headers[0] == "Content-Type: font/woff2", "font type");
+    expect(cached(font, false, get("/fonts/Geist-Variable.woff2", "")).headers.contains("Cache-Control: public, max-age=86400"), "font cache");
+    expect((asset(cfg, "/fonts/pretendard.css") ?? panic("no pretendard.css")).headers[0] == "Content-Type: text/css; charset=utf-8", "pretendard.css");
+    expect(asset(cfg, "/fonts/README.md") is none && asset(cfg, "/fonts/../rok/rok.rokon") is none, "fonts only");
+    expect(body_of(page).contains("<link rel=\"preload\" href=\"/fonts/Geist-Variable.woff2\"") && !body_of(page).contains("googleapis") && !body_of(page).contains("jsdelivr"), "own fonts");
 }
 
 /// Share links: content-addressed, never rewritten, strict ids, a cap.

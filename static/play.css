@@ -16,10 +16,13 @@
   --gutter-ink: rgb(105 107 117 / .7);
   --sel: rgb(0 106 165 / .22);
 }
-.rk.dk {
-  --btn-hover: #d796b5;
-  --gutter-ink: rgb(126 128 136 / .7);
-  --sel: rgb(122 213 248 / .22);
+/* paper is light (rok.css): the dark values are for screens */
+@media not print {
+  .rk.dk {
+    --btn-hover: #d796b5;
+    --gutter-ink: rgb(126 128 136 / .7);
+    --sel: rgb(122 213 248 / .22);
+  }
 }
 
 html, body { height: 100%; }
@@ -39,7 +42,7 @@ button, select, textarea { font: inherit; color: inherit; }
 .tb {
   height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--field-line);
   border-radius: 6px;
   background: var(--panel);
   font-size: 13px;
@@ -108,7 +111,7 @@ select.tb.mono { font-size: 12px; }
 .sharebar[hidden] { display: none; }
 .sharebar label { white-space: nowrap; }
 .sharebar .lk { margin-left: auto; }
-.sharebar input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 12px; }
+.sharebar input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 12px; }
 
 /* Editor beside output; stacked under 860px. */
 
@@ -314,4 +317,8 @@ select.tb.mono { font-size: 12px; }
   .ib.theme, .more > summary { width: 36px; height: 36px; }
   .sharebar { flex-wrap: wrap; padding: 8px 12px; }
   .sharebar input { flex-basis: 100%; order: 3; height: 36px; font-size: 16px; }
+}
+/* Print: the code and its output; no toolbar, share bar or tips. */
+@media print {
+  .hdr, .sharebar, .tip { display: none !important; }
 }
