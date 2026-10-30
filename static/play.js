@@ -290,7 +290,7 @@ const store = {
 };
 const texts = new Map();
 async function exampleText(file) {
-  if (!texts.has(file)) texts.set(file, await (await fetch(`examples/${file}.rok`)).text());
+  if (!texts.has(file)) texts.set(file, await (await fetch(`/examples/${file}.rok`)).text());
   return texts.get(file);
 }
 
@@ -555,7 +555,7 @@ async function run() {
   aborter = new AbortController();
   let res, body;
   try {
-    res = await fetch(`api/compile?opt=${opt.value}`, { method: "POST", body: ed.value, headers: { "Content-Type": "text/plain; charset=utf-8" }, signal: aborter.signal });
+    res = await fetch(`/api/compile?opt=${opt.value}`, { method: "POST", body: ed.value, headers: { "Content-Type": "text/plain; charset=utf-8" }, signal: aborter.signal });
     body = res.ok && !res.headers.has("X-Rok-Diagnostics") ? await res.arrayBuffer() : await res.text();
   } catch {
     if (me !== gen) return;
@@ -586,7 +586,7 @@ async function run() {
   print("\n");
   say("running…");
   const t1 = performance.now();
-  worker = new Worker("run.js", { type: "module" });
+  worker = new Worker("/run.js", { type: "module" });
   timer = setTimeout(() => {
     finish();
     print(`\nstopped after ${LIMIT / 1000} s\n`, "warn", true);

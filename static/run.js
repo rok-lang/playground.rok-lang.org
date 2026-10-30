@@ -2,7 +2,7 @@
 // freeze it: output goes back line by line, then the exit code. Past
 // what the page shows, output is dropped here, so a program that
 // prints forever cannot flood the page with messages.
-import { load } from "./rok.mjs";
+import { load } from "/rok.mjs";
 
 onmessage = async ({ data: { wasm, lines, chars } }) => {
   const dec = [new TextDecoder(), new TextDecoder()];
