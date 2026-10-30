@@ -5,4 +5,6 @@ try {
   var t = m ? m[1] : localStorage.getItem("theme");
   if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   document.documentElement.className = "rk " + (t === "dark" ? "dk" : "lt");
+  // The browser bar follows the theme in use, not just the system's.
+  document.querySelector('meta[name="theme-color"]').content = t === "dark" ? "#090a0d" : "#fbfbfc";
 } catch (e) { document.documentElement.className = "rk lt"; }

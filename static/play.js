@@ -326,27 +326,42 @@ pick.addEventListener("change", async () => {
   else show(await exampleText(v), v);
 });
 
-// The code in the link.
+// The code in the link: #code= is the deflated source; #src= the plain
+// UTF-8, for browsers without deflate-raw (Chrome < 103, Safari < 16.4,
+// Samsung Internet < 20). Both are base64url.
 
-
-const b64 = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const LINK_LIMIT = 262144;
+function can(stream) {
+  try { new globalThis[stream]("deflate-raw"); return true; } catch { return false; }
+}
+const canDeflate = can("CompressionStream");
+// In slices: JavaScriptCore caps a call at 64Ki arguments.
+function b64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 async function pack(text) {
+  if (!canDeflate) return "src=" + b64(new TextEncoder().encode(text));
   const s = new Blob([text]).stream().pipeThrough(new CompressionStream("deflate-raw"));
-  return b64(new Uint8Array(await new Response(s).arrayBuffer()));
+  return "code=" + b64(new Uint8Array(await new Response(s).arrayBuffer()));
 }
-async function unpack(code) {
+async function unpack(kind, data) {
+  if (kind === "src") {
+    if (data.length > LINK_LIMIT * 4 / 3 + 4) throw new Error("too large");
+    return new TextDecoder().decode(unb64(data));
+  }
   // Read the decompressed bytes with a cap, so a crafted link cannot
   // decompression-bomb the editor. The real source limit is 64 KiB.
-  const LIMIT = 262144;
-  const r = new Blob([unb64(code)]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+  const r = new Blob([unb64(data)]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
   const parts = [];
   let total = 0;
   for (;;) {
     const { done, value } = await r.read();
     if (done) break;
     total += value.length;
-    if (total > LIMIT) { await r.cancel(); throw new Error("too large"); }
+    if (total > LINK_LIMIT) { await r.cancel(); throw new Error("too large"); }
     parts.push(value);
   }
   const buf = new Uint8Array(total);
@@ -354,20 +369,44 @@ async function unpack(code) {
   for (const p of parts) { buf.set(p, at); at += p.length; }
   return new TextDecoder().decode(buf);
 }
-$("share").addEventListener("click", async () => {
-  const q = opt.value !== "0" ? `&opt=${opt.value}` : "";
-  const url = `${location.origin}${location.pathname}#code=${await pack(ed.value)}${q}`;
-  history.replaceState(null, "", url);
-  const btn = $("share");
-  try {
-    await navigator.clipboard.writeText(url);
-    btn.textContent = "Link copied";
-  } catch {
-    btn.textContent = "Link in the address bar";
+
+// Safari only lets a click write the clipboard if the write starts in
+// the click itself, so the link goes in as a promise; then writeText;
+// then false, and the caller shows the link to copy by hand.
+async function copyText(text) {
+  if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+    try {
+      const blob = text.then((t) => new Blob([t], { type: "text/plain" }));
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]);
+      return true;
+    } catch {}
   }
-  clearTimeout(btn.reset);
-  btn.reset = setTimeout(() => { btn.textContent = "Share"; }, 2000);
+  try { await navigator.clipboard.writeText(await text); return true; } catch { return false; }
+}
+
+const shareBtn = $("share");
+const shareBar = $("sharebar");
+const shareUrl = $("share-url");
+function flash(text) {
+  shareBtn.textContent = text;
+  clearTimeout(shareBtn.reset);
+  shareBtn.reset = setTimeout(() => { shareBtn.textContent = "Share"; }, 2000);
+}
+shareBtn.addEventListener("click", async () => {
+  const q = opt.value !== "0" ? `&opt=${opt.value}` : "";
+  const link = pack(ed.value).then((frag) => `${location.origin}${location.pathname}#${frag}${q}`);
+  const copied = await copyText(link);
+  let url;
+  try { url = await link; } catch { flash("Share failed"); return; }
+  history.replaceState(null, "", url);
+  if (copied) { shareBar.hidden = true; flash("Link copied"); return; }
+  shareUrl.value = url;
+  shareBar.hidden = false;
+  shareUrl.focus();
+  shareUrl.select();
 });
+$("share-close").addEventListener("click", () => { shareBar.hidden = true; shareBtn.focus(); });
+shareUrl.addEventListener("keydown", (ev) => { if (ev.key === "Escape") $("share-close").click(); });
 
 
 function say(text, kind) {
@@ -632,10 +671,11 @@ document.querySelector(".skip").addEventListener("click", (ev) => { ev.preventDe
   try { localStorage.removeItem("play.code"); } catch {}
   if (mine) { store.set("play.mine", mine); show(mine, "mine"); }
   const hello = await exampleText("hello");
-  const m = location.hash.match(/^#code=([\w-]+)/);
+  const m = location.hash.match(/^#(code|src)=([\w-]+)/);
   if (m) {
     let text = null;
-    try { text = await unpack(m[1]); } catch { say("the link's code is damaged", "bad"); }
+    if (m[1] === "code" && !can("DecompressionStream")) say("this browser cannot open this link; try a newer one", "bad");
+    else try { text = await unpack(m[1], m[2]); } catch { say("the link's code is damaged", "bad"); }
     if (text !== null && text !== mine) {
       if (!mine || mine === hello) { mine = text; store.set("play.mine", mine); }
       else { linked = text; pick.add(new Option("Code from the link", "link"), pick.options[EXAMPLES.length]); }
@@ -698,6 +738,7 @@ if (divider && panes) {
 const root = document.documentElement;
 const dark = matchMedia("(prefers-color-scheme: dark)");
 const themeBtn = document.querySelector(".theme");
+const themeColor = document.querySelector('meta[name="theme-color"]');
 const COOKIE = "; Path=/; SameSite=Lax; Secure" + (/(^|\.)rok-lang\.org$/.test(location.hostname) ? "; Domain=.rok-lang.org" : "");
 function getTheme() {
   const c = document.cookie.match(/(?:^|;\s*)theme=(light|dark)(?:;|$)/);
@@ -710,6 +751,7 @@ function applyTheme() {
   const d = t === "dark" || (t === "auto" && dark.matches);
   root.classList.toggle("dk", d);
   root.classList.toggle("lt", !d);
+  themeColor.content = getComputedStyle(root).getPropertyValue("--bg").trim() || (d ? "#090a0d" : "#fbfbfc");
   for (const b of document.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", String(b.dataset.theme === t));
   themeBtn.setAttribute("aria-pressed", String(d));
   themeBtn.title = d ? "Switch to light theme" : "Switch to dark theme";

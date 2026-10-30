@@ -10,6 +10,15 @@
   --ed-font: 14px;
   --ed-line: 23px;
   --ed-pad: 14px;
+  /* plain values per theme: no color-mix() for older engines */
+  --btn-hover: #35363a;
+  --gutter-ink: rgb(105 107 117 / .7);
+  --sel: rgb(0 106 165 / .22);
+}
+.rk.dk {
+  --btn-hover: #d796b5;
+  --gutter-ink: rgb(126 128 136 / .7);
+  --sel: rgb(122 213 248 / .22);
 }
 
 html, body { height: 100%; }
@@ -25,7 +34,7 @@ button, select, textarea { font: inherit; color: inherit; }
 .hdr .brand { min-height: 24px; font-size: 15px; margin-right: 8px; white-space: nowrap; }
 .tools { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .run { height: 32px; padding: 0 14px; font-size: 13px; white-space: nowrap; }
-.run:hover { background: color-mix(in oklch, var(--btn) 86%, var(--bg)); }
+.run:hover { background: var(--btn-hover); }
 .run { justify-content: center; }
 .run .kbd { background: transparent; color: inherit; border-color: currentColor; opacity: .6; font-size: 12px; }
 .tb {
@@ -63,6 +72,13 @@ select.tb.mono { font-size: 12px; }
 .dk .theme .sun { display: block; }
 .dk .theme .moon { display: none; }
 
+/* The share link, to copy by hand when the clipboard says no. */
+.sharebar { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg-2); color: var(--ink-2); }
+.sharebar[hidden] { display: none; }
+.sharebar label { white-space: nowrap; }
+.sharebar .lk { margin-left: auto; }
+.sharebar input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 12px; }
+
 /* Editor beside output; stacked under 860px. */
 
 .ws {
@@ -91,7 +107,7 @@ select.tb.mono { font-size: 12px; }
 .divider::after { content: ""; position: absolute; inset: 0 -4px; z-index: 2; }
 .divider:hover, .divider:focus-visible { background: var(--acc); }
 .rk .divider:focus-visible { outline: none; }
-.ws.dragging { cursor: col-resize; user-select: none; }
+.ws.dragging { cursor: col-resize; -webkit-user-select: none; user-select: none; }
 
 /* The editor: a transparent textarea over its highlighted copy, with a
    layer for diagnostic underlines in between. */
@@ -106,7 +122,8 @@ select.tb.mono { font-size: 12px; }
   text-align: right;
   font-size: var(--ed-font);
   line-height: var(--ed-line);
-  color: color-mix(in oklch, var(--ink-3) 70%, transparent);
+  color: var(--gutter-ink);
+  -webkit-user-select: none;
   user-select: none;
   box-sizing: border-box;
 }
@@ -135,7 +152,7 @@ select.tb.mono { font-size: 12px; }
 .sqs .sq { text-decoration: underline wavy var(--err); text-decoration-thickness: 1.5px; text-underline-offset: 4px; text-decoration-skip-ink: none; }
 .sqs .sq.w { text-decoration-color: var(--warn); }
 .ed-body textarea { resize: none; background: transparent; color: transparent; caret-color: var(--ink); outline: none; }
-.ed-body textarea::selection { background: color-mix(in oklch, var(--link) 22%, transparent); color: transparent; }
+.ed-body textarea::selection { background: var(--sel); color: transparent; }
 .rk .ed-body textarea:focus-visible { outline: none; }
 
 /* A diagnostic, under the code it is about. */
@@ -265,4 +282,6 @@ select.tb.mono { font-size: 12px; }
 @media (max-width: 767px) {
   .rk { --ed-font: 16px; --ed-line: 25px; }
   .tb, select.tb.mono, .run { font-size: 16px; height: 36px; }
+  .sharebar { flex-wrap: wrap; padding: 8px 12px; }
+  .sharebar input { flex-basis: 100%; order: 3; height: 36px; font-size: 16px; }
 }

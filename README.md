@@ -3,7 +3,7 @@
 Source for https://playground.rok-lang.org, the browser playground for Rok. The page sends source to this server, which compiles it with `rokc --target=wasm32-unknown-unknown` and returns the module; the page runs it in a Web Worker. The server is written in Rok.
 
 - Programs are one file, with no files, network, or threads (those calls fail with `Unsupported`), and stop after 10 seconds.
-- The server keeps no source. The page keeps the visitor's code in the browser's `localStorage`; Share puts the deflated source in the link's `#code=` fragment.
+- The server keeps no source. The page keeps the visitor's code in the browser's `localStorage`; Share puts the deflated source in the link's `#code=` fragment (`#src=`, plain base64url, in browsers without deflate-raw).
 - Compiled modules are cached by SHA-256 of level + source.
 
 ## Run it locally
