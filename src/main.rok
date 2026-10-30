@@ -309,9 +309,11 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
     if p == "/rok.mjs" && !cfg.mjs.is_empty() {
         if let f: Resp = file_resp(cfg.mjs) { return f; }
     }
-    let path = if p == "/" { "/index.html" } else { p };
+    if let c: str = http::canonical(p) {
+        return Resp { status: 301, headers: [http::moved(c, r.query), "Cache-Control: public, max-age=3600"], body: List::new() };
+    }
     for root in ["static", cfg.site] {
-        if let f: str = http::static_file(root, path) {
+        if let f: str = http::page_file(root, p) {
             if let x: Resp = file_resp(f) { return x; }
         }
     }

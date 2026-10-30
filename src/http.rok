@@ -166,6 +166,7 @@ pub fn read_request(s: TcpStream, max_body: usize, limit: Duration) throws (Http
 pub fn reason(status: i32) -> str {
     match status {
         200 => "OK",
+        301 => "Moved Permanently",
         302 => "Found",
         303 => "See Other",
         400 => "Bad Request",
@@ -271,8 +272,6 @@ pub fn cookie(r: Request, name: str) -> str {
     ""
 }
 
-// ---- static files ----
-
 pub fn content_type(path: str) -> str {
     let ext = match path.rfind(".") {
         at: usize => path[at + 1:].to_lowercase(),
@@ -296,9 +295,39 @@ pub fn content_type(path: str) -> str {
     }
 }
 
+// ---- static files ----
+
+/// The canonical form of request path `path`, or none when it is
+/// canonical already: `/a/b.html`, `/a/b/`, `/a/b/index.html` and
+/// `/a/b/index` are all `/a/b`, `/index.html` is `/`. Repeated slashes
+/// collapse, so `//host` never leaves the site; a path with a backslash
+/// is left alone (`/\host` would). Same rules as rok-lang.org's url.rok.
+pub fn canonical(path: str) -> str | none {
+    if path.contains("\\") { return none; }
+    let segs: List<str> = List::new();
+    for s in path.split("/") {
+        if !s.is_empty() { segs.push(s); }
+    }
+    if segs.len() > 0 {
+        let last = segs[segs.len() - 1];
+        if let b: str = last.strip_suffix(".html") { last = b; }
+        if last == "index" || last.is_empty() {
+            segs.pop();
+        } else {
+            segs[segs.len() - 1] = last;
+        }
+    }
+    let c = "/" + segs.join("/");
+    if c == path { none } else { c }
+}
+
+/// The `Location` of a 301 from `path` to `to`, query kept.
+pub fn moved(to: str, query: str) -> str {
+    if query.is_empty() { f"Location: {to}" } else { f"Location: {to}?{query}" }
+}
+
 /// The file under `root` that URL path `path` names, or none: decoded,
-/// no `..`, `.` files, backslashes or NUL; a directory means its
-/// `index.html` (never a listing).
+/// no `..`, `.` files, backslashes or NUL; files only (never a listing).
 pub fn static_file(root: str, path: str) -> str | none {
     let p = pct_decode(path, false)?;
     if p.contains("\\") || p.contains("\u{0}") { return none; }
@@ -308,15 +337,17 @@ pub fn static_file(root: str, path: str) -> str | none {
         if s.starts_with(".") { return none; }
         segs.push(s);
     }
-    let rel = segs.join("/");
-    let full = if rel.is_empty() { root } else { root + "/" + rel };
+    if segs.is_empty() { return none; }
+    let full = root + "/" + segs.join("/");
     let meta = try fs::metadata(full) catch _ { return none; };
-    if meta.is_dir() {
-        let idx = full + "/index.html";
-        let m2 = try fs::metadata(idx) catch _ { return none; };
-        return if m2.is_file() { idx } else { none };
-    }
     if meta.is_file() { full } else { none }
+}
+
+/// The file a canonical path names: `<path>.html`, else the file itself
+/// (assets keep their names), else `<path>/index.html`.
+pub fn page_file(root: str, path: str) -> str | none {
+    if path == "/" { return static_file(root, "/index.html"); }
+    static_file(root, path + ".html") ?? static_file(root, path) ?? static_file(root, path + "/index.html")
 }
 
 #[cfg(test)]
@@ -354,7 +385,22 @@ fn forms_and_paths() {
     expect(static_file("static", "/play.css") == "static/play.css", "file");
     expect(static_file("static", "/../main.rok") is none, "dotdot");
     expect(static_file("static", "/%2e%2e/main.rok") is none, "encoded dotdot");
-    expect(static_file("static", "/") == "static/index.html", "index");
-    expect(static_file("static", "/examples") is none, "no listing");
+    expect(static_file("static", "/") is none, "no listing");
+    expect(static_file("static", "/examples") is none, "no directories");
+    expect(page_file("static", "/") == "static/index.html", "index");
     expect(static_file(".", "/.git/config") is none, "dot files");
+}
+
+#[test]
+fn canonical_paths() {
+    let c = |p: str| canonical(p) ?? "=";
+    expect(c("/") == "=" && c("/stones") == "=" && c("/stones/json/versions") == "=", "canonical already");
+    expect(c("/rok.css") == "=" && c("/og/json.png") == "=" && c("/search-index.json") == "=", "assets");
+    expect(c("/index.html") == "/" && c("/index") == "/" && c("//") == "/", "root");
+    expect(c("/stones/") == "/stones" && c("/stones/index") == "/stones" && c("/stones/index.html") == "/stones", "directory");
+    expect(c("/stones/json.html") == "/stones/json" && c("/stones/json/versions/") == "/stones/json/versions", "page");
+    expect(c("/stones/index.html/") == "/stones" && c("/stones//json") == "/stones/json", "repeated");
+    expect(c("//evil.example/") == "/evil.example" && c("/\\evil.example/") == "=", "never off the site");
+    expect(c("/indexer") == "=" && c("/my-index") == "=", "index only as a segment");
+    expect(moved("/a", "") == "Location: /a" && moved("/a", "q=x") == "Location: /a?q=x", "query kept");
 }
