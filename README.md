@@ -34,7 +34,7 @@ Environment variables:
 | `PLAY_TIMEOUT` | `20` | Seconds a compile may take |
 | `PLAY_RATE` | `30` | Compiles a minute per client |
 
-The compile API is `POST /api/compile?opt=0` (body: UTF-8 source, max 64 KiB) returning `application/wasm` or `422` with rokc diagnostics; see `src/main.rok`.
+The compile API is `POST /api/compile?opt=0` (body: UTF-8 source, max 64 KiB) returning `application/wasm`, or rokc's diagnostics as text with an `X-Rok-Diagnostics: 1` header (both 200; 4xx/5xx only for the request itself); see `src/main.rok`.
 
 ## Deploy (Linux)
 
