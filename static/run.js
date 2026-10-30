@@ -17,6 +17,13 @@ onmessage = async ({ data: { wasm, lines, chars } }) => {
     const app = await load(wasm, { args: ["main"], write });
     postMessage({ code: app.main() });
   } catch (e) {
-    postMessage({ error: String(e && e.message || e) });
+    postMessage({ error: String(e && e.message || e), old: !canWasm() });
   }
 };
+
+// Can this engine compile wasm under the page's CSP at all? Engines
+// without 'wasm-unsafe-eval' (Safari < 16, Chrome < 97) refuse even the
+// empty module.
+function canWasm() {
+  try { new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])); return true; } catch { return false; }
+}

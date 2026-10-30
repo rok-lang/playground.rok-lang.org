@@ -635,9 +635,18 @@ async function run() {
     if (data.text !== undefined) { print(data.text, data.fd === 2 ? "err" : ""); return; }
     finish();
     const ms = performance.now() - t1;
+    if (data.old) { print("This browser is too old to run WebAssembly here; try a newer browser.\n", "err", true); say("cannot run", "bad"); return; }
     if (data.error) { print(`\n${data.error}\n`, "err", true); say("crashed", "bad"); return; }
     if (data.code !== 0) print(`\nexit code ${data.code}\n`, "warn", true);
     say(`exit ${data.code} · ${secs(ms)}`, data.code === 0 ? "" : "bad");
+  };
+  // A worker that never starts (no module workers: Firefox < 114) would
+  // otherwise sit silent until the time limit.
+  worker.onerror = (ev) => {
+    ev.preventDefault();
+    finish();
+    print(`\nthe runner failed to start${ev.message ? `: ${ev.message}` : ""}\n`, "err", true);
+    say("crashed", "bad");
   };
   worker.postMessage({ wasm: body, lines: MAX_LINES, chars: MAX_CHARS }, [body]);
 }
