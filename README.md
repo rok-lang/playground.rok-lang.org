@@ -18,6 +18,10 @@ PLAY_ROKC=~/.rok/toolchains/<version>-aarch64-apple-darwin/bin/rokc ./target/deb
 
 Without `PLAY_WRAP` the server only listens on loopback: an unsandboxed rokc could be made to read the machine's files.
 
+## Link previews
+
+`static/index.html` points og:image and twitter:image at `og.png?v=dev`; the server puts the first 10 hex digits of og.png's SHA-256 (hashed at start) in place of `dev`, so a new image is a new URL, and caches `og.png` at that `?v=` for a year (`immutable`), anything else for an hour. When only a page's text changes, the cached card stays: re-scrape it with the [Facebook Sharing Debugger](https://developers.facebook.com/tools/debug/), the [LinkedIn Post Inspector](https://www.linkedin.com/post-inspector/) or Kakao's [sharing debugger](https://developers.kakao.com/tool/debugger/sharing) (clear the cache); X has no tool and refreshes in about 7 days.
+
 ## Settings
 
 Environment variables:

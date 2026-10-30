@@ -69,6 +69,9 @@ struct Cfg {
     timeout: u64;
     rate: i64;
     client_header: str;
+    /// The og:image version: the first 10 hex digits of og.png's SHA-256,
+    /// put in place of index.html's `og.png?v=dev` when it is served.
+    og: str;
 }
 
 fn setting(k: str, dflt: str) -> str {
@@ -95,7 +98,17 @@ fn load_cfg() throws -> Cfg {
     let jobs = try setting("PLAY_JOBS", "2").parse::<i64>();
     let timeout = try setting("PLAY_TIMEOUT", "20").parse::<u64>();
     let rate = try setting("PLAY_RATE", "30").parse::<i64>();
-    Cfg { addr: setting("PLAY_ADDR", "127.0.0.1:8405"), rokc: rokc, site: setting("PLAY_SITE", "../rok-lang.org/static"), mjs: mjs, wrap: try env::var("PLAY_WRAP") catch _ { "" }, work: work, jobs: jobs, timeout: timeout, rate: rate, client_header: setting("PLAY_CLIENT_HEADER", "").to_lowercase() }
+    Cfg { addr: setting("PLAY_ADDR", "127.0.0.1:8405"), rokc: rokc, site: setting("PLAY_SITE", "../rok-lang.org/static"), mjs: mjs, wrap: try env::var("PLAY_WRAP") catch _ { "" }, work: work, jobs: jobs, timeout: timeout, rate: rate, client_header: setting("PLAY_CLIENT_HEADER", "").to_lowercase(), og: og_version(["static", setting("PLAY_SITE", "../rok-lang.org/static")]) }
+}
+
+/// The version of the og.png that `/og.png` serves from `roots`, or
+/// `dev` without one.
+fn og_version(roots: List<str>) -> str {
+    for root in roots {
+        let data = try fs::read(root + "/og.png") catch _ { continue; };
+        return hex(HashAlgorithm::Sha256.digest(data))[:10];
+    }
+    "dev"
 }
 
 // ---- answers ----
@@ -295,6 +308,27 @@ fn file_resp(path: str) -> Resp | none {
     Resp { status: 200, headers: [f"Content-Type: {http::content_type(path)}", "Cache-Control: no-cache", CSP], body: data }
 }
 
+/// A page with the og:image version filled in: a new og.png is a new
+/// URL, so link previews refetch it.
+fn page_resp(cfg: Cfg, path: str) -> Resp | none {
+    let r = file_resp(path) ?? { return none; };
+    if !path.ends_with(".html") { return r; }
+    let html = try str::from_utf8(r.body[0:r.body.len()]) catch _ { return r; };
+    let b: List<u8> = List::new();
+    for x in html.replace("og.png?v=dev", "og.png?v=" + cfg.og).as_bytes() { b.push(x); }
+    r.body = b;
+    r
+}
+
+/// og.png asked for by its current version never changes: cache it for
+/// good. The bare or a stale address stays short.
+fn og_cache(cfg: Cfg, query: str) -> str {
+    for kv in query.split("&") {
+        if kv == "v=" + cfg.og && cfg.og != "dev" { return "Cache-Control: public, max-age=31536000, immutable"; }
+    }
+    "Cache-Control: public, max-age=3600"
+}
+
 fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
     let p = r.path;
     if p == "/api/compile" {
@@ -314,7 +348,11 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
     }
     for root in ["static", cfg.site] {
         if let f: str = http::page_file(root, p) {
-            if let x: Resp = file_resp(f) { return x; }
+            if let x: Resp = page_resp(cfg, f) {
+                // headers[1] is file_resp's Cache-Control.
+                if p == "/og.png" { x.headers[1] = og_cache(cfg, r.query); }
+                return x;
+            }
         }
     }
     text(404, "Not found.")
@@ -384,7 +422,7 @@ fn compile_errors_are_answers() {
     try fs::create_dir_all(work + "/jobs") catch e { panic(f"{e}"); };
     // A stand-in rokc, run by the wrap command so it needs no exec bit.
     try fs::write(work + "/rokc.sh", "echo 'error: boom' >&2\nexit 1\n") catch e { panic(f"{e}"); };
-    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/rokc.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "" };
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/rokc.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", og: "0123456789" };
     let r = compile(cfg, "fn main() {}\n", "0");
     try fs::remove_dir_all(work) catch _ {};
     expect(r.status == 200, "status");
@@ -395,4 +433,9 @@ fn compile_errors_are_answers() {
     expect(no.status == 200 && no.headers.contains("X-Rok-Diagnostics: 1"), "refused");
     expect(body_of(no).contains("include_str!"), "refused body");
     expect(text(429, "slow down").headers.len() == 2, "real errors keep their status, no header");
+
+    expect(og_cache(cfg, "v=0123456789") == "Cache-Control: public, max-age=31536000, immutable", "versioned og");
+    expect(og_cache(cfg, "") == "Cache-Control: public, max-age=3600" && og_cache(cfg, "v=x") == "Cache-Control: public, max-age=3600", "bare og");
+    let page = page_resp(cfg, "static/index.html") ?? panic("no index.html");
+    expect(body_of(page).contains("og.png?v=0123456789") && !body_of(page).contains("v=dev"), "og version in page");
 }
