@@ -66,11 +66,7 @@ select.tb.mono { font-size: 12px; }
 }
 
 /* The Rok sites: in the header when there is room, else in the menu. */
-.hdr .sites { margin-left: auto; }
-.hdr .sites nav { display: flex; gap: 2px; }
-.hdr .sites a { padding: 6px 10px; border-radius: 6px; color: var(--ink-2); font-size: 14px; line-height: 20px; white-space: nowrap; }
-.hdr .sites a:hover { color: var(--ink); text-decoration: none; }
-.hdr .sites a[aria-current] { color: var(--ink); background: var(--bg-2); font-weight: 500; }
+.hdr .sites { margin-left: auto; flex-wrap: nowrap; }
 .ver { white-space: nowrap; }
 .ib.theme, .more > summary { width: 32px; height: 32px; flex: none; }
 .ib.theme:hover, .more > summary:hover, .more[open] > summary { color: var(--ink); border-color: var(--ink-3); }
@@ -255,11 +251,9 @@ select.tb.mono { font-size: 12px; }
 .out .loc:hover { text-decoration-color: currentColor; }
 .note { flex: none; margin: 0; padding: 10px 16px; border-top: 1px solid var(--line); font-size: 12px; line-height: 17px; color: var(--ink-3); text-wrap: pretty; }
 
-/* 404: the header, then one sentence. */
+/* 404: the header, then the body every Rok site shares (rok.css). */
 .nf .hdr .sites { margin-left: auto; }
-.lost { flex: 1; display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 1160px; margin: 0 auto; padding: 56px 24px; box-sizing: border-box; }
-.lost h1, .lost p { margin: 0; }
-.lost .t-lead { color: var(--ink-2); }
+.nf-main { flex: 1; width: 100%; max-width: 1160px; margin: 0 auto; padding: 32px 24px; box-sizing: border-box; }
 
 /* The sites go into the menu, then the release. */
 @media (max-width: 1320px) {
@@ -295,9 +289,9 @@ select.tb.mono { font-size: 12px; }
   /* About a screen under the toolbar, scrolling inside, so Run can
      bring all of it into view and long output stays in its pane. */
   .out-pane { height: max(320px, 78vh); height: max(320px, 78svh); }
-  .nf .hdr .in > .sites { display: block; order: 3; flex-basis: 100%; margin: 0 0 0 -10px; }
+  .nf .hdr .in > .sites { display: flex; order: 3; flex-basis: 100%; margin: 0 0 0 -10px; }
   .nf .ib.theme { margin-left: auto; }
-  .lost { padding: 40px 16px; }
+  .nf-main { padding: 24px 16px; }
 }
 /* Phones: the theme switch is in the menu, so row one fits. Buttons
    are not fields, so they can stay under 16px. */

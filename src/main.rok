@@ -371,11 +371,12 @@ fn kit_resp(path: str) -> Resp | none {
     Resp { status: 200, headers: [f"Content-Type: {http::content_type(name)}", "Cache-Control: no-cache", CSP], body: b }
 }
 
-/// index.html's shared markup, from the kit's chrome: each
+/// The pages' shared markup, from the kit's chrome: each
 /// `<!--web:name-->` placeholder replaced.
 fn fill(html: str) -> str {
     let sites = chrome::Sites { home: "https://rok-lang.org", docs: "https://docs.rok-lang.org/latest", stones: "https://rokstones.io", playground: "/", current: "playground" };
-    html.replace("<!--web:theme-button-->", chrome::theme_button(false)).replace("<!--web:sites-->", chrome::sites_nav(sites)).replace("<!--web:social-->", chrome::SOCIAL).replace("<!--web:theme-seg-->", chrome::theme_seg(false))
+    let lost = chrome::not_found("Page not found", "There is no page at this address.", [("/", "Back to the playground")]);
+    html.replace("<!--web:theme-button-->", chrome::theme_button(false)).replace("<!--web:header-sites-->", chrome::header_sites(sites, false)).replace("<!--web:credits-->", f"<span>{chrome::LICENSE}</span> · {chrome::MADE_BY}").replace("<!--web:social-->", chrome::SOCIAL).replace("<!--web:theme-seg-->", chrome::theme_seg(false)).replace("<!--web:not-found-->", lost)
 }
 
 /// A page with the og:image version and the shared markup filled in: a
@@ -534,9 +535,10 @@ fn compile_errors_are_answers() {
     expect(css.headers[0] == "Content-Type: text/css; charset=utf-8" && css.body.len() > 0, "kit file");
     expect(kit_resp("/theme-init.js") is Resp && kit_resp("/play.js") is none, "kit names only");
     expect(body_of(page).contains("class=\"seg\"") && body_of(page).contains("class=\"social\""), "menu");
+    expect(body_of(page).contains("<nav class=\"nav sites\"") && body_of(page).contains("<span>MIT OR Apache-2.0</span> · <span>Made by"), "header sites, credits");
 
     let lost = not_found(cfg, "/nope");
-    expect(lost.status == 404 && body_of(lost).contains("Back to the playground") && !body_of(lost).contains("<!--web:"), "404 page");
+    expect(lost.status == 404 && body_of(lost).contains("Back to the playground") && body_of(lost).contains("<div class=\"lost\">") && !body_of(lost).contains("<!--web:"), "404 page");
     expect(not_found(cfg, "/api/nope").status == 404 && body_of(not_found(cfg, "/api/nope")) == "Not found.", "404 api");
 }
 
