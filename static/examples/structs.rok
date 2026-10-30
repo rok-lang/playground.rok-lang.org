@@ -1,4 +1,5 @@
-// A struct, a method, and a trait it implements.
+// A struct, a method, and a
+// trait it implements.
 
 struct Point {
     x: f64;

@@ -1,5 +1,6 @@
 // Welcome to the Rok Playground!
-// Edit the code, then press ▶ Run (or ⌘/Ctrl+Enter).
+// Edit the code and press ▶ Run
+// (Ctrl+Enter, or ⌘+Enter).
 
 fn main() {
     let name = "rok";

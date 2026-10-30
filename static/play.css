@@ -1,5 +1,6 @@
-/* The playground: a toolbar header, the editor and the output side by
-   side (stacked on phones), a slim footer. Tokens and components come
+/* The playground: a toolbar header (the site links, theme and credits
+   in it or in its menu), the editor and the output side by side
+   (stacked on phones). Tokens and components come
    from rok.css (the web kit); this file only lays them out and adds
    what a code playground needs. */
 
@@ -30,15 +31,16 @@ button, select, textarea { font: inherit; color: inherit; }
 .hdr .in { height: 52px; padding: 0 14px; gap: 10px; }
 .hdr .brand { min-height: 24px; font-size: 15px; margin-right: 8px; white-space: nowrap; }
 .tools { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.run { height: 32px; padding: 0 14px; font-size: 13px; white-space: nowrap; }
+.run { height: 32px; padding: 0 14px; font-size: 13px; white-space: nowrap; justify-content: center; }
 .run:hover { background: var(--btn-hover); }
-.run { justify-content: center; }
-.run .kbd { background: transparent; color: inherit; border-color: currentColor; opacity: .6; font-size: 12px; }
+.tools .btn-2 { height: 32px; padding: 0 12px; box-sizing: border-box; white-space: nowrap; justify-content: center; }
+.tools .btn-2:hover { border-color: var(--ink-3); }
+.tools .btn-2:disabled { color: var(--ink-3) !important; cursor: default; }
 .tb {
   height: 32px;
   padding: 0 10px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--panel);
   font-size: 13px;
   color: var(--ink);
@@ -62,9 +64,48 @@ select.tb.mono { font-size: 12px; }
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 6l5 5 5-5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
   pointer-events: none;
 }
-.ver { margin-left: auto; white-space: nowrap; }
-.ib.theme { width: 32px; height: 32px; flex: none; }
-.ib.theme:hover { color: var(--ink); border-color: var(--ink-3); }
+
+/* The Rok sites: in the header when there is room, else in the menu. */
+.hdr .sites { margin-left: auto; }
+.hdr .sites nav { display: flex; gap: 2px; }
+.hdr .sites a { padding: 6px 10px; border-radius: 6px; color: var(--ink-2); font-size: 14px; line-height: 20px; white-space: nowrap; }
+.hdr .sites a:hover { color: var(--ink); text-decoration: none; }
+.hdr .sites a[aria-current] { color: var(--ink); background: var(--bg-2); font-weight: 500; }
+.ver { white-space: nowrap; }
+.ib.theme, .more > summary { width: 32px; height: 32px; flex: none; }
+.ib.theme:hover, .more > summary:hover, .more[open] > summary { color: var(--ink); border-color: var(--ink-3); }
+
+/* The menu: the sites (when the header has no room), the release,
+   licence and credit, the social links and the System / Light / Dark
+   switch the other Rok sites keep in their footers. */
+.more { position: relative; flex: none; }
+.more > summary { list-style: none; }
+.more > summary::-webkit-details-marker { display: none; }
+.more .menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 10;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px -8px rgb(0 0 0 / .3);
+  color: var(--ink-3);
+}
+.more .menu p { margin: 0; }
+.more .menu p a { color: var(--ink-2); }
+.more .menu .mono { font-size: 12px; }
+.more .menu .sites { margin: 0 0 2px -10px; }
+.more .menu .seg { margin: 0; }
+.more .menu .social { margin-left: -6px; }
 
 /* The share link, to copy by hand when the clipboard says no. */
 .sharebar { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg-2); color: var(--ink-2); }
@@ -184,7 +225,7 @@ select.tb.mono { font-size: 12px; }
 
 /* The output follows the theme: white on light, near black on dark. */
 .out-pane { background: var(--term); }
-.ph .tab { align-self: stretch; display: flex; align-items: center; color: var(--ink); font-weight: 500; box-shadow: inset 0 -2px 0 var(--acc); }
+.ph .lbl { color: var(--ink-2); font-weight: 500; }
 .ph .meta { margin-left: auto; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ph .meta[data-kind="bad"] { color: var(--err); }
 .lk { min-height: 24px; padding: 2px 0; border: 0; background: none; color: var(--ink-2); font-size: 13px; cursor: pointer; }
@@ -210,33 +251,24 @@ select.tb.mono { font-size: 12px; }
 .out .e { color: var(--err); font-weight: 600; }
 .out .warn { color: var(--warn); }
 .out .w { color: var(--warn); font-weight: 600; }
+.out .loc { padding: 0; border: 0; background: none; font: inherit; color: var(--link); cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
+.out .loc:hover { text-decoration-color: currentColor; }
 .note { flex: none; margin: 0; padding: 10px 16px; border-top: 1px solid var(--line); font-size: 12px; line-height: 17px; color: var(--ink-3); text-wrap: pretty; }
 
-/* The shared slim footer. */
+/* 404: the header, then one sentence. */
+.nf .hdr .sites { margin-left: auto; }
+.lost { flex: 1; display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 1160px; margin: 0 auto; padding: 56px 24px; box-sizing: border-box; }
+.lost h1, .lost p { margin: 0; }
+.lost .t-lead { color: var(--ink-2); }
 
-.ft {
-  flex: none;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 20px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--line);
-  background: var(--bg-2);
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--ink-3);
+/* The sites go into the menu, then the release. */
+@media (max-width: 1320px) {
+  .hdr .in > .sites { display: none; }
+  .ver { margin-left: auto; }
 }
-.ft a { display: inline-flex; align-items: center; min-height: 24px; }
-.ft .brand { font-size: 14px; gap: 7px; }
-.ft nav { display: flex; gap: 16px; }
-.ft nav a { color: var(--ink-2); }
-.ft nav a[aria-current] { color: var(--ink); }
-.ft > span a { color: var(--ink-2); }
-.ft .mono { font-size: 12px; }
-.seg button { min-height: 24px; }
-
-
+@media (min-width: 1321px) {
+  .menu .sites { display: none; }
+}
 @media (max-width: 1080px) {
   .ver { display: none; }
   .ib.theme { margin-left: auto; }
@@ -245,24 +277,35 @@ select.tb.mono { font-size: 12px; }
   body { height: auto; }
   .hdr .in { height: auto; flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
   .hdr .brand { margin-right: 0; }
-  /* Row one: brand, Share, theme; row two: Run and the two pickers. */
+  /* Row one: brand, Format, Share, theme, menu; row two: Run and the
+     two pickers. */
   .tools { display: contents; }
-  #share { order: 1; margin-left: auto; }
+  #fmt { order: 1; margin-left: auto; }
+  #share { order: 1; }
   .ib.theme { order: 2; margin-left: 0; }
+  .more { order: 2; }
   .hdr .in::after { content: ""; order: 3; flex-basis: 100%; }
   .run { order: 4; }
   .pick { order: 5; }
   .pick:has(#example) { flex: 1; min-width: 0; }
   .pick #example { width: 100%; max-width: none; }
-  .run .kbd { display: none; }
   .ws { display: flex; flex-direction: column; }
   .divider { display: none; }
   .ed-pane { height: 58vh; min-height: min(320px, 70vh); border-bottom: 1px solid var(--line); }
   /* About a screen under the toolbar, scrolling inside, so Run can
      bring all of it into view and long output stays in its pane. */
   .out-pane { height: max(320px, 78vh); height: max(320px, 78svh); }
-  .ft { padding: 12px; }
-  .seg { margin-left: 0; }
+  .nf .hdr .in > .sites { display: block; order: 3; flex-basis: 100%; margin: 0 0 0 -10px; }
+  .nf .ib.theme { margin-left: auto; }
+  .lost { padding: 40px 16px; }
+}
+/* Phones: the theme switch is in the menu, so row one fits. Buttons
+   are not fields, so they can stay under 16px. */
+@media (max-width: 480px) {
+  .hdr .in { column-gap: 6px; }
+  .hdr .in > .ib.theme { display: none; }
+  .rk .tools .btn-2 { font-size: 14px; padding: 0 10px; }
+  .nf .hdr .in > .ib.theme { display: flex; }
 }
 /* Portrait phones: the toolbar stays reachable while the output scrolls. */
 @media (max-width: 860px) and (min-height: 560px) {
@@ -272,7 +315,8 @@ select.tb.mono { font-size: 12px; }
    editor's layers and the toolbar follow. */
 @media (max-width: 767px) {
   .rk { --ed-font: 16px; --ed-line: 25px; }
-  .tb, select.tb.mono, .run { font-size: 16px; height: 36px; }
+  .tb, select.tb.mono, .run, .tools .btn-2 { font-size: 16px; height: 36px; }
+  .ib.theme, .more > summary { width: 36px; height: 36px; }
   .sharebar { flex-wrap: wrap; padding: 8px 12px; }
   .sharebar input { flex-basis: 100%; order: 3; height: 36px; font-size: 16px; }
 }

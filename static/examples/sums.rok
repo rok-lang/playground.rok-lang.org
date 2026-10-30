@@ -1,4 +1,5 @@
-// A closed sum type: `match` must cover every variant.
+// A closed sum type: `match`
+// must cover every variant.
 
 enum Shape {
     Circle(f64),

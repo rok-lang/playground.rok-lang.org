@@ -1,5 +1,7 @@
-// Errors are part of a function's type: `throws (E)`.
-// The caller writes `try` to pass them on, or `catch` to handle them.
+// Errors are in a function's
+// type: `throws (E)`. The caller
+// writes `try` to pass them on,
+// or `catch` to handle them.
 
 fn parse_port(s: str) throws (ParseError) -> u16 {
     try s.parse::<u16>()

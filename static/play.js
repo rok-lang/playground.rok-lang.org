@@ -110,19 +110,29 @@ function showDiagCount() {
   diagBtn.classList.toggle("w", !errs && warns > 0);
   diagBtn.title = diags.some((d) => d.line) ? "Go to the first one" : "";
 }
+// Puts the caret at line:col and scrolls it into view. On stacked
+// panes the editor comes back into view too.
+function goTo(line, col) {
+  const lines = ed.value.split("\n");
+  let i = 0;
+  for (let k = 0; k < line - 1 && k < lines.length; k++) i += lines[k].length + 1;
+  i += Math.min(col - 1, (lines[line - 1] || "").length);
+  ed.focus({ preventScroll: true });
+  ed.setSelectionRange(i, i);
+  const cs = getComputedStyle(ed);
+  const lh = parseFloat(cs.lineHeight);
+  ed.scrollTop = Math.max(0, (line - 4) * lh);
+  const x = parseFloat(cs.paddingLeft) + (col - 1) * cellWidth();
+  if (x < ed.scrollLeft || x > ed.scrollLeft + ed.clientWidth - 24) ed.scrollLeft = Math.max(0, x - ed.clientWidth / 2);
+  sync();
+  const pane = ed.closest(".ed-pane").getBoundingClientRect();
+  if (pane.top < 0 || pane.bottom > innerHeight) ed.closest(".ed-pane").scrollIntoView({ block: "nearest" });
+  showPos();
+}
 // The count jumps to the first diagnostic with a place in the source.
 diagBtn.addEventListener("click", () => {
   const d = diags.find((x) => x.line);
-  if (!d) return;
-  const lines = ed.value.split("\n");
-  let i = 0;
-  for (let k = 0; k < d.line - 1 && k < lines.length; k++) i += lines[k].length + 1;
-  i += Math.min(d.col - 1, (lines[d.line - 1] || "").length);
-  ed.focus();
-  ed.setSelectionRange(i, i);
-  const lh = parseFloat(getComputedStyle(ed).lineHeight);
-  ed.scrollTop = Math.max(0, (d.line - 4) * lh);
-  showPos();
+  if (d) goTo(d.line, d.col);
 });
 
 // One monospace cell, measured once the fonts are in.
@@ -280,6 +290,7 @@ ed.addEventListener("keydown", (ev) => {
 const EXAMPLES = [
   ["hello", "Hello, world"], ["sums", "Sum types and match"], ["none", "T | none and ??"],
   ["errors", "throws, try, catch"], ["iter", "Lists, closures, iterators"], ["structs", "Structs and traits"],
+  ["error", "Compile error: T | none"], ["try", "Compile error: missing try"],
 ];
 for (const [file, label] of EXAMPLES) pick.append(new Option(label, file));
 pick.append(new Option("Your code", "mine"));
@@ -323,7 +334,7 @@ pick.addEventListener("change", async () => {
   const v = pick.value;
   if (v === "mine") show(mine, "mine");
   else if (v === "link") show(linked, "link");
-  else show(await exampleText(v), v);
+  else { show(await exampleText(v), v); run(true); }
 });
 
 // The code in the link: #code= is the deflated source; #src= the plain
@@ -424,10 +435,10 @@ let queue = [];
 let frame = 0;
 let shown = { lines: 0, chars: 0, cut: false };
 
-function put(text, cls) {
+function put(text, cls, at) {
   const last = queue[queue.length - 1];
-  if (last && last[1] === cls) last[0] += text;
-  else queue.push([text, cls]);
+  if (last && last[1] === cls && !at && !last[2]) last[0] += text;
+  else queue.push([text, cls, at]);
   if (!frame) frame = requestAnimationFrame(flush);
 }
 // `always` is for the run's own notes, which still show after a cut.
@@ -450,7 +461,17 @@ function flush() {
   frame = 0;
   const atEnd = out.scrollHeight - out.scrollTop - out.clientHeight < 32;
   const frag = document.createDocumentFragment();
-  for (const [text, cls] of queue) {
+  for (const [text, cls, at] of queue) {
+    if (at) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "loc";
+      b.textContent = text;
+      b.title = `Go to line ${at[0]}, column ${at[1]}`;
+      b.dataset.at = at.join(":");
+      frag.append(b);
+      continue;
+    }
     if (!cls) { frag.append(text); continue; }
     const span = document.createElement("span");
     span.className = cls;
@@ -474,6 +495,13 @@ function step(verb, rest) {
   print(verb.padStart(12) + " ", "v");
   print(rest + "\n");
 }
+// `--> main.rok:L:C` in the output puts the caret there.
+out.addEventListener("click", (ev) => {
+  const b = ev.target.closest(".loc");
+  if (!b) return;
+  const [line, col] = b.dataset.at.split(":").map(Number);
+  goTo(line, col);
+});
 $("clear").addEventListener("click", () => { clearOut(); copyBtn.disabled = true; say(""); });
 
 copyBtn.addEventListener("click", async () => {
@@ -523,6 +551,8 @@ function showErrors(text) {
     } else if ((m = line.match(/^(\s*)(-->|=|\d* ?\|)(.*)$/))) {
       print(m[1]);
       print(m[2], "g");
+      const loc = m[2] === "-->" && m[3].match(/^(\s*)(main\.rok:(\d+):(\d+))(.*)$/);
+      if (loc) { print(loc[1]); put(loc[2], "loc", [+loc[3], +loc[4]]); print(loc[5] + "\n"); continue; }
       const caret = m[3].match(/^(\s*)(\^+)(.*)$/);
       if (caret) { print(caret[1]); print(caret[2], diags.some((d) => !d.warn) ? "e" : "w"); print(caret[3] + "\n"); }
       else print(m[3] + "\n");
@@ -537,7 +567,8 @@ function showErrors(text) {
 // replaced. While a run is in flight the Run button is Stop.
 const LIMIT = 10_000;
 const secs = (ms) => `${(ms / 1000).toFixed(2)} s`;
-const runHTML = () => `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1v8l7-4z" fill="currentColor"/></svg>Run <kbd class="kbd">${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘↵" : "Ctrl↵"}</kbd>`;
+const RUN_HTML = `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1v8l7-4z" fill="currentColor"/></svg>Run`;
+const RUN_TITLE = `Run (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘Enter" : "Ctrl+Enter"})`;
 const STOP_HTML = `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1" fill="currentColor"/></svg>Stop`;
 let gen = 0;
 let worker = null;
@@ -547,7 +578,8 @@ let timer = 0;
 function busy(on) {
   if (on && !runBtn.dataset.running) runBtn.style.minWidth = `${runBtn.offsetWidth}px`;
   if (!on) runBtn.style.minWidth = "";
-  runBtn.innerHTML = on ? STOP_HTML : runHTML();
+  runBtn.innerHTML = on ? STOP_HTML : RUN_HTML;
+  runBtn.title = on ? "Stop" : RUN_TITLE;
   if (on) { runBtn.dataset.running = "1"; runBtn.removeAttribute("aria-keyshortcuts"); }
   else { delete runBtn.dataset.running; runBtn.setAttribute("aria-keyshortcuts", "Control+Enter Meta+Enter"); }
 }
@@ -579,7 +611,7 @@ function reveal() {
   scrollTo({ top: scrollY + top, behavior: still ? "auto" : "smooth" });
 }
 
-async function run() {
+async function run(auto = false) {
   finish();
   const me = gen;
   clearOut();
@@ -589,7 +621,7 @@ async function run() {
   busy(true);
   say("compiling…");
   step("Compiling", `main.rok (wasm32, -O${opt.value})`);
-  reveal();
+  if (!auto) reveal();
   const t0 = performance.now();
   aborter = new AbortController();
   let res, body;
@@ -656,6 +688,55 @@ document.addEventListener("keydown", (ev) => {
 });
 busy(false);
 
+// Format: rokc fmt on the server, through the same sandbox as a build.
+// The new text goes in as one edit, so Undo brings the old back.
+const fmtBtn = $("fmt");
+fmtBtn.addEventListener("click", async () => {
+  const src = ed.value;
+  if (!src.trim()) return;
+  fmtBtn.disabled = true;
+  let res, body;
+  try {
+    res = await fetch("/api/fmt", { method: "POST", body: src, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    body = await res.text();
+  } catch {
+    say("offline", "bad");
+    fmtBtn.disabled = false;
+    return;
+  }
+  fmtBtn.disabled = false;
+  if (ed.value !== src) return;
+  if (!res.ok) { say(body.trim() || `HTTP ${res.status}`, "bad"); return; }
+  if (res.headers.has("X-Rok-Diagnostics")) {
+    finish();
+    clearOut();
+    showErrors(body);
+    say("cannot format", "bad");
+    return;
+  }
+  if (body === src) { say("already formatted"); return; }
+  const { line, col } = caretAt(ed.selectionStart);
+  const top = ed.scrollTop;
+  ed.focus({ preventScroll: true });
+  ed.select();
+  if (!document.execCommand("insertText", false, body)) { ed.value = body; ed.dispatchEvent(new Event("input")); }
+  const lines = body.split("\n");
+  let i = 0;
+  for (let k = 0; k < line - 1 && k < lines.length; k++) i += lines[k].length + 1;
+  i += Math.min(col - 1, (lines[line - 1] || "").length);
+  ed.setSelectionRange(i, i);
+  ed.scrollTop = top;
+  sync();
+  say("formatted");
+});
+
+// The menu closes on Escape, on a click outside it, and on a pick.
+const more = $("more");
+document.addEventListener("click", (ev) => { if (more.open && !more.contains(ev.target)) more.open = false; });
+more.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && more.open) { more.open = false; more.querySelector("summary").focus(); }
+});
+
 // On a phone the optimisation picker says only -O0 / -O2, so the
 // example picker keeps room for its name.
 const narrow = matchMedia("(max-width: 480px)");
@@ -694,6 +775,10 @@ document.querySelector(".skip").addEventListener("click", (ev) => { ev.preventDe
   if (linked !== null) show(linked, "link");
   else if (ed.value !== mine) show(mine, "mine");
   else syncPick();
+  // An example shows what it prints straight away; the visitor's own
+  // code and a link's wait for Run.
+  if (pick.value !== "mine" && pick.value !== "link") run(true);
+  else if (!out.childNodes.length) out.innerHTML = `<span class="dim">Press Run to compile main.rok and run it here.</span>`;
 })();
 
 // A draggable divider resizes the editor vs the output (desktop only).

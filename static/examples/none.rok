@@ -1,5 +1,8 @@
-// A value that may be missing says so in its type: `T | none`.
-// `??` gives the default; `if let` takes the value out.
+// A value that may be missing
+// says so in its type:
+// `T | none`. `??` gives a
+// default; `if let` takes the
+// value out.
 
 fn find(xs: List<str>, key: str) -> usize | none {
     for i in 0..xs.len() {

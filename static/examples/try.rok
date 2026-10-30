@@ -1,0 +1,12 @@
+// Nor does this: a call that
+// can throw must be marked
+// `try`, and rokc says how.
+
+fn parse_port(s: str) throws (ParseError) -> u16 {
+    try s.parse::<u16>()
+}
+
+fn main() {
+    let port = parse_port("8080");
+    println(f"port {port}");
+}

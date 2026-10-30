@@ -1,0 +1,8 @@
+// This does not compile. Run it:
+// rokc says what is wrong and,
+// in its help, what to write.
+
+fn main() {
+    let name: str | none = none;
+    println(name.len());
+}

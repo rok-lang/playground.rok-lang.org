@@ -38,13 +38,25 @@
 <div class="in">
 <a class="brand" href="/"><svg width="22" height="22" viewBox="0 0 64 64" aria-hidden="true"><g fill="#f9a8d4" transform="translate(1.5 0)"><path d="M33 9.2C35 9.2 36.6 9.5 37.6 10.3C38.4 11 38.5 12 38.2 13.2L27.6 52.6C27.2 54.1 26 54.9 24.4 54.8C14 54 7.8 45 7.2 33C6.6 19.5 18 9.3 33 9.2Z"/><path d="M44 14.6C44.4 13.2 45.4 12.6 46.8 12.9C53.6 14.4 58.4 21 58.4 30.5C58.4 41 51.6 49.6 40.6 50.6C36.4 51 34.2 50.2 34.6 48.4Z" transform="translate(0 -4.5) translate(46 31) scale(.82) translate(-46 -31)"/></g></svg>Rok<span class="sl">/</span><span class="site">Playground</span></a>
 <div class="tools" role="toolbar" aria-label="Playground">
-<button class="btn btn-sm run" type="button" id="run" aria-keyshortcuts="Control+Enter Meta+Enter"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1v8l7-4z" fill="currentColor"/></svg>Run <kbd class="kbd">⌘↵</kbd></button>
+<button class="btn btn-sm run" type="button" id="run" title="Run (Ctrl+Enter)" aria-keyshortcuts="Control+Enter Meta+Enter"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1v8l7-4z" fill="currentColor"/></svg>Run</button>
 <label class="pick"><span class="sr-only">Example</span><select class="tb" id="example"></select></label>
 <label class="pick"><span class="sr-only">Optimization level</span><select class="tb mono" id="opt"><option value="0">-O0 · debug</option><option value="2">-O2 · release</option></select></label>
-<button class="tb" type="button" id="share">Share</button>
+<button class="btn-2 btn-sm" type="button" id="fmt" title="Lay the code out with rokc fmt">Format</button>
+<button class="btn-2 btn-sm" type="button" id="share">Share</button>
 </div>
+<div class="sites"><!--web:sites--></div>
 <span class="ver mono t-small">rok 0.1.4 → wasm32</span>
 <!--web:theme-button-->
+<details class="more" id="more">
+<summary class="ib" aria-label="More" title="More"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1.5" fill="currentColor"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="13" cy="8" r="1.5" fill="currentColor"/></svg></summary>
+<div class="menu t-small">
+<div class="sites"><!--web:sites--></div>
+<p class="mono">rok 0.1.4 → wasm32</p>
+<p>MIT OR Apache-2.0 · Made by <a href="https://daminstudio.com">DaminStudio</a></p>
+<!--web:social-->
+<!--web:theme-seg-->
+</div>
+</details>
 </div>
 </header>
 <div class="sharebar t-small" id="sharebar" hidden><label for="share-url">Copy this link:</label><input id="share-url" class="mono" type="url" readonly><button class="lk" type="button" id="share-close">Close</button></div>
@@ -65,20 +77,11 @@
 </section>
 <div class="divider" role="separator" aria-orientation="vertical" aria-label="Resize the panes" aria-valuemin="25" aria-valuemax="75" aria-valuenow="60" tabindex="0"></div>
 <section class="pane out-pane" aria-label="Output">
-<div class="ph"><span class="tab">Output</span><span class="meta mono" id="status" role="status" aria-live="polite"></span><button class="lk" type="button" id="copy-out" disabled>Copy</button><button class="lk" type="button" id="clear">Clear</button></div>
-<pre class="out mono" id="out" tabindex="0" aria-label="Program output"><span class="dim">Press Run to compile main.rok and run it here.</span></pre>
+<div class="ph"><span class="lbl">Output</span><span class="meta mono" id="status" role="status" aria-live="polite"></span><button class="lk" type="button" id="copy-out" disabled>Copy</button><button class="lk" type="button" id="clear">Clear</button></div>
+<pre class="out mono" id="out" tabindex="0" aria-label="Program output"></pre>
 <p class="note">Compiled to WebAssembly on the server, run in your browser. One file of up to 64 KiB; no files, network or threads; a run stops after 10 s. Your code stays in this browser; Share puts it in the link.</p>
 </section>
 </main>
-<footer class="ft">
-<a class="brand" href="https://rok-lang.org"><svg width="16" height="16" viewBox="0 0 64 64" aria-hidden="true"><g fill="#f9a8d4" transform="translate(1.5 0)"><path d="M33 9.2C35 9.2 36.6 9.5 37.6 10.3C38.4 11 38.5 12 38.2 13.2L27.6 52.6C27.2 54.1 26 54.9 24.4 54.8C14 54 7.8 45 7.2 33C6.6 19.5 18 9.3 33 9.2Z"/><path d="M44 14.6C44.4 13.2 45.4 12.6 46.8 12.9C53.6 14.4 58.4 21 58.4 30.5C58.4 41 51.6 49.6 40.6 50.6C36.4 51 34.2 50.2 34.6 48.4Z" transform="translate(0 -4.5) translate(46 31) scale(.82) translate(-46 -31)"/></g></svg>Rok</a>
-<!--web:sites-->
-<span class="mono">rok 0.1.4</span>
-<span>MIT OR Apache-2.0</span>
-<span>Made by <a href="https://daminstudio.com">DaminStudio</a></span>
-<!--web:social-->
-<!--web:theme-seg-->
-</footer>
 <script type="module" src="/play.js"></script>
 </body>
 </html>
