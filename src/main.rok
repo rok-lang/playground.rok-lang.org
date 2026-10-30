@@ -9,6 +9,12 @@
 //   POST /api/fmt               body: the same. 200: the source as
 //                               `rokc fmt` lays it out, or its
 //                               diagnostics (header as above).
+//   POST /api/share             body: the same. 200: the id of a short
+//                               link that holds the source, stored
+//                               under PLAY_SHARES (never compiled or
+//                               run here); 400 / 409 / 413 / 429 / 503.
+//   GET  /api/share/<id>        the stored source, or 404
+//   GET  /p/<id>                the page with that source in the editor
 //   GET  /...                   static/, then the web kit's files
 //                               (web/, built in), then PLAY_SITE, and
 //                               /rok.mjs
@@ -28,6 +34,9 @@
 //   PLAY_WRAP     ""                PLAY_WORK    <temp>/rok-playground
 //   PLAY_JOBS     2                 PLAY_TIMEOUT 20
 //   PLAY_RATE     30 (compiles per minute and client)
+//   PLAY_SHARES   <PLAY_WORK>/shares: stored share links, one file each
+//   PLAY_SHARE_RATE  10 (share links per minute and client)
+//   PLAY_SHARE_MAX   100000 (links kept; past it, new ones are refused)
 //   PLAY_CLIENT_HEADER  (none)  the header a trusted proxy sets with the
 //                 real client IP, e.g. cf-connecting-ip behind Cloudflare
 //                 or x-forwarded-for behind Caddy. Unset (the default),
@@ -60,10 +69,15 @@ const MAX_DIAG: usize = 65536;
 const MAX_WASM: u64 = 33554432u64;
 /// Seconds `rokc fmt` may take: it only lexes and re-indents.
 const FMT_TIMEOUT: u64 = 5u64;
+/// Characters of a share id: lowercase RFC 4648 base32, 10 of them.
+const ID_CHARS: str = "abcdefghijklmnopqrstuvwxyz234567";
+const ID_LEN: usize = 10;
 
 static ACTIVE: Atomic<i64> = Atomic::new(0i64);
 static JOBS: Atomic<i64> = Atomic::new(0i64);
 static SEQ: Atomic<i64> = Atomic::new(0i64);
+/// Share links stored, counted at start and on each new one.
+static SHARES: Atomic<i64> = Atomic::new(0i64);
 
 struct Cfg {
     addr: str;
@@ -78,6 +92,9 @@ struct Cfg {
     timeout: u64;
     rate: i64;
     client_header: str;
+    shares: str;
+    share_rate: i64;
+    share_max: i64;
     /// The og:image version: the first 10 hex digits of og.png's SHA-256,
     /// put in place of index.html's `og.png?v=dev` when it is served.
     og: str;
@@ -107,7 +124,9 @@ fn load_cfg() throws -> Cfg {
     let jobs = try setting("PLAY_JOBS", "2").parse::<i64>();
     let timeout = try setting("PLAY_TIMEOUT", "20").parse::<u64>();
     let rate = try setting("PLAY_RATE", "30").parse::<i64>();
-    Cfg { addr: setting("PLAY_ADDR", "127.0.0.1:8405"), rokc: rokc, site: setting("PLAY_SITE", "../rok-lang.org/static"), mjs: mjs, wrap: try env::var("PLAY_WRAP") catch _ { "" }, work: work, jobs: jobs, timeout: timeout, rate: rate, client_header: setting("PLAY_CLIENT_HEADER", "").to_lowercase(), og: og_version(["static", setting("PLAY_SITE", "../rok-lang.org/static")]) }
+    let share_rate = try setting("PLAY_SHARE_RATE", "10").parse::<i64>();
+    let share_max = try setting("PLAY_SHARE_MAX", "100000").parse::<i64>();
+    Cfg { addr: setting("PLAY_ADDR", "127.0.0.1:8405"), rokc: rokc, site: setting("PLAY_SITE", "../rok-lang.org/static"), mjs: mjs, wrap: try env::var("PLAY_WRAP") catch _ { "" }, work: work, jobs: jobs, timeout: timeout, rate: rate, client_header: setting("PLAY_CLIENT_HEADER", "").to_lowercase(), shares: setting("PLAY_SHARES", work + "/shares"), share_rate: share_rate, share_max: share_max, og: og_version(["static", setting("PLAY_SITE", "../rok-lang.org/static")]) }
 }
 
 /// The version of the og.png that `/og.png` serves from `roots`, or
@@ -115,9 +134,19 @@ fn load_cfg() throws -> Cfg {
 fn og_version(roots: List<str>) -> str {
     for root in roots {
         let data = try fs::read(root + "/og.png") catch _ { continue; };
-        return hex(HashAlgorithm::Sha256.digest(data))[:10];
+        return version(data);
     }
     "dev"
+}
+
+/// The first 10 hex digits of the SHA-256 of `data`: the `?v=` that
+/// names this content.
+fn version(data: List<u8>) -> str { hex(HashAlgorithm::Sha256.digest(data))[:10] }
+
+fn bytes_of(s: str) -> List<u8> {
+    let b: List<u8> = List::new();
+    for x in s.as_bytes() { b.push(x); }
+    b
 }
 
 // ---- answers ----
@@ -129,9 +158,7 @@ struct Resp {
 }
 
 fn text(status: i32, msg: str) -> Resp {
-    let b: List<u8> = List::new();
-    for x in msg.as_bytes() { b.push(x); }
-    Resp { status: status, headers: ["Content-Type: text/plain; charset=utf-8", "Cache-Control: no-store"], body: b }
+    Resp { status: status, headers: ["Content-Type: text/plain; charset=utf-8", "Cache-Control: no-store"], body: bytes_of(msg) }
 }
 
 /// A program that does not compile is an answer, not a failed request:
@@ -346,6 +373,85 @@ fn format_in(cfg: Cfg, src: str, dir: str) -> Resp {
     text(200, out)
 }
 
+// ---- share links: the source in a file named by its hash ----
+
+/// The id of `src`: the first 50 bits of its SHA-256 in base32, so the
+/// same code is always the same link.
+fn share_id(src: str) -> str {
+    let d = HashAlgorithm::Sha256.digest(src.as_bytes());
+    let v = 0u64;
+    for k in 0..8 { v = (v << 8u64) | (d[k] as u64); }
+    let out = StrBuf::new();
+    for k in 0..ID_LEN {
+        let i = ((v >> (59u64 - 5u64 * (k as u64))) & 31u64) as usize;
+        out.push_str(ID_CHARS[i:i + 1]);
+    }
+    out.to_str()
+}
+
+/// Whether `id` could be a share id; anything else never reaches the
+/// file system.
+fn valid_id(id: str) -> bool {
+    if id.len() != ID_LEN { return false; }
+    for c in id.chars() {
+        if !ID_CHARS.contains(f"{c}") { return false; }
+    }
+    true
+}
+
+/// Store `src` and answer its id. An existing file is never rewritten:
+/// the same id holds the same code, and a different code under it (a
+/// hash collision) is refused, so the page falls back to a #code link.
+fn share(cfg: Cfg, src: str) -> Resp {
+    let id = share_id(src);
+    let path = cfg.shares + "/" + id + ".rok";
+    if fs::exists(path) {
+        let old = try fs::read_to_str(path) catch _ { "" };
+        return if old == src { text(200, id) } else { text(409, "Cannot make a short link for this code.") };
+    }
+    if SHARES.load() >= cfg.share_max { return text(503, "No room for new short links."); }
+    try fs::create_dir_all(cfg.shares) catch e {
+        eprintln(f"share: {e}");
+        return text(500, "Cannot store the link.");
+    };
+    try fs::write_atomic(path, src) catch e {
+        eprintln(f"share: {e}");
+        return text(500, "Cannot store the link.");
+    };
+    SHARES.fetch_add(1i64);
+    text(200, id)
+}
+
+/// The source stored under `id`, or none.
+fn shared(cfg: Cfg, id: str) -> str | none {
+    if !valid_id(id) { return none; }
+    let path = cfg.shares + "/" + id + ".rok";
+    let md = try fs::symlink_metadata(path) catch _ { return none; };
+    if !md.is_file() || md.len() > MAX_SOURCE as u64 { return none; }
+    try fs::read_to_str(path) catch _ { none }
+}
+
+fn count_shares(dir: str) -> i64 {
+    let n = 0i64;
+    for e in try fs::read_dir(dir) catch _ { return 0i64; } {
+        let ent = try e.get() catch _ { continue; };
+        if ent.file_name().ends_with(".rok") { n += 1i64; }
+    }
+    n
+}
+
+/// The page with a stored source in it: in a hidden <pre> the script
+/// reads (the newline after <pre> is the one the parser drops), and kept
+/// out of search results.
+fn shared_page(cfg: Cfg, src: str) -> Resp | none {
+    let r = page_resp(cfg, "static/index.html") ?? { return none; };
+    let html = try str::from_utf8(r.body[0:r.body.len()]) catch _ { return none; };
+    // index.html has one <title> and one <main>.
+    r.body = bytes_of(html.replace("<title>", "<meta name=\"robots\" content=\"noindex\">\n<title>")
+        .replace("<main ", f"<pre id=\"shared\" hidden>\n{chrome::esc(src)}</pre>\n<main "));
+    r
+}
+
 // ---- routes ----
 
 /// The page's own headers: scripts and workers from here only (and the
@@ -379,33 +485,65 @@ fn fill(html: str) -> str {
     html.replace("<!--web:theme-button-->", chrome::theme_button(false)).replace("<!--web:header-sites-->", chrome::header_sites(sites, false)).replace("<!--web:credits-->", f"<span>{chrome::LICENSE}</span> · {chrome::MADE_BY}").replace("<!--web:social-->", chrome::SOCIAL).replace("<!--web:theme-seg-->", chrome::theme_seg(false)).replace("<!--web:not-found-->", lost)
 }
 
-/// A page with the og:image version and the shared markup filled in: a
-/// new og.png is a new URL, so link previews refetch it.
+/// A page with the og:image version, the shared markup and the asset
+/// versions filled in: a new og.png is a new URL, so link previews
+/// refetch it.
 fn page_resp(cfg: Cfg, path: str) -> Resp | none {
     let r = file_resp(path) ?? { return none; };
     if !path.ends_with(".html") { return r; }
     let html = try str::from_utf8(r.body[0:r.body.len()]) catch _ { return r; };
-    let b: List<u8> = List::new();
-    for x in fill(html.replace("og.png?v=dev", "og.png?v=" + cfg.og)).as_bytes() { b.push(x); }
-    r.body = b;
+    r.body = bytes_of(stamp(cfg, fill(html.replace("og.png?v=dev", "og.png?v=" + cfg.og))));
     r
 }
 
-/// og.png asked for by its current version never changes: cache it for
-/// good. The bare or a stale address stays short.
-fn og_cache(cfg: Cfg, query: str) -> str {
-    for kv in query.split("&") {
-        if kv == "v=" + cfg.og && cfg.og != "dev" { return "Cache-Control: public, max-age=31536000, immutable"; }
+/// The stylesheets and scripts a page names, as `"/x?v=<version>"`, so
+/// a browser keeps each until it changes.
+fn stamp(cfg: Cfg, html: str) -> str {
+    let out = html;
+    for p in ["/rok.css", "/play.css", "/theme.js", "/play.js"] {
+        if let x: Resp = asset(cfg, p) { out = out.replace(f"\"{p}\"", f"\"{p}?v={version(x.body)}\""); }
     }
-    "Cache-Control: public, max-age=3600"
+    out
 }
 
 /// The file under `root` that canonical path `p` names, as a page.
-fn site_file(cfg: Cfg, root: str, p: str, query: str) -> Resp | none {
+fn site_file(cfg: Cfg, root: str, p: str) -> Resp | none {
     let f = http::page_file(root, p) ?? { return none; };
-    let x = page_resp(cfg, f) ?? { return none; };
-    // headers[1] is file_resp's Cache-Control.
-    if p == "/og.png" { x.headers[1] = og_cache(cfg, query); }
+    page_resp(cfg, f)
+}
+
+/// The file at public path `p`: static/, then the kit, then PLAY_SITE.
+fn asset(cfg: Cfg, p: str) -> Resp | none {
+    site_file(cfg, "static", p) ?? kit_resp(p) ?? site_file(cfg, cfg.site, p)
+}
+
+/// Whether If-None-Match value `inm` names `etag`.
+fn etag_match(inm: str, etag: str) -> bool {
+    for t in inm.split(",") {
+        let x = t.trim();
+        if x == "*" || x == etag || x == "W/" + etag { return true; }
+    }
+    false
+}
+
+/// A file answer's caching: a page for five minutes, a file asked for by
+/// its current `?v=` for a year, anything else revalidated each time;
+/// always an ETag of the content, and 304 when the client holds it.
+fn cached(x: Resp, page: bool, query: str, inm: str) -> Resp {
+    let h = hex(HashAlgorithm::Sha256.digest(x.body));
+    let etag = "\"" + h[:16] + "\"";
+    let cc = "Cache-Control: no-cache";
+    if page {
+        cc = "Cache-Control: public, max-age=300";
+    } else {
+        for kv in query.split("&") {
+            if kv == "v=" + h[:10] { cc = "Cache-Control: public, max-age=31536000, immutable"; }
+        }
+    }
+    // headers[1] is file_resp's and kit_resp's Cache-Control.
+    x.headers[1] = cc;
+    x.headers.push("ETag: " + etag);
+    if !inm.is_empty() && etag_match(inm, etag) { return Resp { status: 304, headers: [cc, "ETag: " + etag], body: List::new() }; }
     x
 }
 
@@ -425,16 +563,31 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
         if r.body.trim().is_empty() { return text(400, "Nothing to format."); }
         return format(cfg, r.body);
     }
+    if p == "/api/share" {
+        if r.method != "POST" { return text(405, "POST the source to /api/share."); }
+        // Its own budget, apart from compiles.
+        if !allow("share " + client_of(s, r, cfg.client_header), cfg.share_rate) { return text(429, f"More than {cfg.share_rate} links a minute; wait a little."); }
+        if r.body.trim().is_empty() { return text(400, "Nothing to share."); }
+        return share(cfg, r.body);
+    }
     if r.method != "GET" && r.method != "HEAD" { return text(405, "Only GET here."); }
+    if p.starts_with("/api/share/") {
+        let src = shared(cfg, p["/api/share/".len():]) ?? { return text(404, "No such link."); };
+        return text(200, src);
+    }
+    let inm = r.header("if-none-match");
     if p == "/rok.mjs" && !cfg.mjs.is_empty() {
-        if let f: Resp = file_resp(cfg.mjs) { return f; }
+        if let f: Resp = file_resp(cfg.mjs) { return cached(f, false, r.query, inm); }
     }
     if let c: str = url::canonical(p) {
         return Resp { status: 301, headers: [url::moved(c, r.query), "Cache-Control: public, max-age=3600"], body: List::new() };
     }
-    if let x: Resp = site_file(cfg, "static", p, r.query) { return x; }
-    if let k: Resp = kit_resp(p) { return k; }
-    if let x: Resp = site_file(cfg, cfg.site, p, r.query) { return x; }
+    if p.starts_with("/p/") {
+        let src = shared(cfg, p[3:]) ?? { return not_found(cfg, p); };
+        let x = shared_page(cfg, src) ?? { return not_found(cfg, p); };
+        return cached(x, true, r.query, inm);
+    }
+    if let x: Resp = asset(cfg, p) { return cached(x, x.headers[0].starts_with("Content-Type: text/html"), r.query, inm); }
     not_found(cfg, p)
 }
 
@@ -449,6 +602,17 @@ fn not_found(cfg: Cfg, p: str) -> Resp {
     text(404, "Not found.")
 }
 
+/// 304 by hand: http::send would add `Content-Length: 0`, which is not
+/// the length of the representation the client holds.
+fn not_modified(s: TcpStream, headers: List<str>) throws {
+    let h = StrBuf::new();
+    h.push_str("HTTP/1.1 304 Not Modified\r\n");
+    for x in headers { h.push_str(x + "\r\n"); }
+    h.push_str("Connection: close\r\n\r\n");
+    try s.set_write_timeout(Duration::sec(30));
+    try s.write_all(h.to_str());
+}
+
 fn handle(s: TcpStream, cfg: Cfg) {
     let t0 = Instant::now();
     let r = try http::read_request(s, MAX_SOURCE, Duration::sec(10)) catch e {
@@ -457,7 +621,8 @@ fn handle(s: TcpStream, cfg: Cfg) {
         return;
     };
     let resp = route(cfg, s, r);
-    try http::send(s, resp.status, resp.headers, resp.body, r.method == "HEAD") catch _ {};
+    if resp.status == 304 { try not_modified(s, resp.headers) catch _ {}; }
+    else { try http::send(s, resp.status, resp.headers, resp.body, r.method == "HEAD") catch _ {}; }
     s.close();
     eprintln(f"{r.method} {r.path} {resp.status} {resp.body.len()}B {t0.elapsed().as_ms()}ms");
 }
@@ -471,6 +636,9 @@ fn main() throws {
         env::exit(2);
     }
     try fs::create_dir_all(cfg.work + "/jobs");
+    // Without a writable share directory, Share falls back to #code links.
+    try fs::create_dir_all(cfg.shares) catch e { eprintln(f"note: share links off: {cfg.shares}: {e}"); };
+    SHARES.store(count_shares(cfg.shares));
     if cfg.mjs.is_empty() || !fs::exists(cfg.mjs) {
         eprintln(f"note: no rok.mjs (PLAY_MJS): pages cannot run programs");
     }
@@ -513,7 +681,7 @@ fn compile_errors_are_answers() {
     try fs::create_dir_all(work + "/jobs") catch e { panic(f"{e}"); };
     // A stand-in rokc, run by the wrap command so it needs no exec bit.
     try fs::write(work + "/rokc.sh", "echo 'error: boom' >&2\nexit 1\n") catch e { panic(f"{e}"); };
-    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/rokc.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", og: "0123456789" };
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/rokc.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: work + "/shares", share_rate: 10, share_max: 2, og: "0123456789" };
     let r = compile(cfg, "fn main() {}\n", "0");
     try fs::remove_dir_all(work) catch _ {};
     expect(r.status == 200, "status");
@@ -525,8 +693,6 @@ fn compile_errors_are_answers() {
     expect(body_of(no).contains("include_str!"), "refused body");
     expect(text(429, "slow down").headers.len() == 2, "real errors keep their status, no header");
 
-    expect(og_cache(cfg, "v=0123456789") == "Cache-Control: public, max-age=31536000, immutable", "versioned og");
-    expect(og_cache(cfg, "") == "Cache-Control: public, max-age=3600" && og_cache(cfg, "v=x") == "Cache-Control: public, max-age=3600", "bare og");
     let page = page_resp(cfg, "static/index.html") ?? panic("no index.html");
     expect(body_of(page).contains("og.png?v=0123456789") && !body_of(page).contains("v=dev"), "og version in page");
     expect(!body_of(page).contains("<!--web:"), "shared markup filled in");
@@ -540,6 +706,54 @@ fn compile_errors_are_answers() {
     let lost = not_found(cfg, "/nope");
     expect(lost.status == 404 && body_of(lost).contains("Back to the playground") && body_of(lost).contains("<div class=\"lost\">") && !body_of(lost).contains("<!--web:"), "404 page");
     expect(not_found(cfg, "/api/nope").status == 404 && body_of(not_found(cfg, "/api/nope")) == "Not found.", "404 api");
+    expect(body_of(page).contains("<h1 class=\"sr-only\">Rok Playground</h1>"), "h1");
+}
+
+/// Files carry an ETag and answer 304 for it; a file asked for by its
+/// current ?v= is cached for good, a page for minutes, the rest revalidated.
+#[test]
+fn caching() {
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: "", site: "", mjs: "", wrap: "", work: "", jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: "", share_rate: 10, share_max: 2, og: "dev" };
+    let page = page_resp(cfg, "static/index.html") ?? panic("no index.html");
+    let js = asset(cfg, "/play.js") ?? panic("no play.js");
+    let v = version(js.body);
+    expect(body_of(page).contains(f"src=\"/play.js?v={v}\""), "stamped play.js");
+    expect(!body_of(page).contains("href=\"/rok.css\"") && !body_of(page).contains("href=\"/play.css\"") && !body_of(page).contains("src=\"/theme.js\""), "stamped css, theme.js");
+    let c = cached(asset(cfg, "/play.js") ?? panic("js"), false, f"v={v}", "");
+    expect(c.status == 200 && c.headers.contains("Cache-Control: public, max-age=31536000, immutable"), "immutable");
+    let etag = c.headers[c.headers.len() - 1];
+    expect(etag.starts_with("ETag: \"") && etag.len() == 24, "etag");
+    let stale = cached(asset(cfg, "/play.js") ?? panic("js"), false, "v=0000000000", "");
+    expect(stale.headers.contains("Cache-Control: no-cache"), "stale version revalidates");
+    let p = cached(page, true, "", "");
+    expect(p.headers.contains("Cache-Control: public, max-age=300"), "page");
+    let tag = etag["ETag: ".len():];
+    let again = cached(asset(cfg, "/play.js") ?? panic("js"), false, "", "W/" + tag + ", \"x\"");
+    expect(again.status == 304 && again.body.len() == 0 && again.headers.contains("ETag: " + tag), "304");
+    expect(cached(asset(cfg, "/play.js") ?? panic("js"), false, "", "\"nope\"").status == 200, "other etag");
+}
+
+/// Share links: content-addressed, never rewritten, strict ids, a cap.
+#[test]
+fn share_links() {
+    let work = f"{env::temp_dir()}/rok-playground-share-{rok::std::process::id()}";
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: "", site: "", mjs: "", wrap: "", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: work + "/shares", share_rate: 10, share_max: 2, og: "dev" };
+    SHARES.store(0i64);
+    let a = share(cfg, "fn main() {}\n");
+    let id = body_of(a);
+    expect(a.status == 200 && valid_id(id) && id == share_id("fn main() {}\n"), "stored");
+    expect(body_of(share(cfg, "fn main() {}\n")) == id && SHARES.load() == 1i64, "same code, same id, one file");
+    expect((shared(cfg, id) ?? "") == "fn main() {}\n", "read back");
+    expect(shared(cfg, "../shares/" + id) is none && shared(cfg, id + "x") is none && shared(cfg, "ABCDEFGHIJ") is none && shared(cfg, "abcdefgh1j") is none, "bad ids");
+    expect(shared(cfg, "aaaaaaaaaa") is none, "unknown id");
+    let x = shared_page(cfg, "</pre><script>alert(1)</script>") ?? panic("page");
+    expect(body_of(x).contains("<pre id=\"shared\" hidden>\n&lt;/pre&gt;&lt;script&gt;") && body_of(x).contains("noindex"), "escaped in the page");
+    // A different code under an existing id is refused, not overwritten.
+    try fs::write(cfg.shares + "/" + share_id("x") + ".rok", "y") catch e { panic(f"{e}"); };
+    expect(share(cfg, "x").status == 409 && (shared(cfg, share_id("x")) ?? "") == "y", "collision");
+    expect(share(cfg, "fn other() {}\n").status == 200 && share(cfg, "fn third() {}\n").status == 503, "cap");
+    expect(count_shares(cfg.shares) == 3i64, "count");
+    try fs::remove_dir_all(work) catch _ {};
 }
 
 /// Format answers the file rokc fmt left, or its diagnostics.
@@ -549,7 +763,7 @@ fn format_answers() {
     try fs::create_dir_all(work + "/jobs") catch e { panic(f"{e}"); };
     try fs::write(work + "/ok.sh", "printf 'fn main() {\\n    f();\\n}\\n' > main.rok\n") catch e { panic(f"{e}"); };
     try fs::write(work + "/bad.sh", "echo 'error[E001]: <fmt>:2:1: unterminated string literal' >&2\nexit 1\n") catch e { panic(f"{e}"); };
-    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/ok.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", og: "dev" };
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/ok.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: work + "/shares", share_rate: 10, share_max: 2, og: "dev" };
     let ok = format(cfg, "fn main() {\nf();\n}\n");
     cfg.rokc = work + "/bad.sh";
     let bad = format(cfg, "fn main() {\n\"\n");

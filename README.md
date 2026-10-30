@@ -3,7 +3,8 @@
 Source for https://playground.rok-lang.org, the browser playground for Rok. The page sends source to this server, which compiles it with `rokc --target=wasm32-unknown-unknown` and returns the module; the page runs it in a Web Worker. The server is written in Rok.
 
 - Programs are one file, with no files, network, or threads (those calls fail with `Unsupported`), and stop after 10 seconds.
-- The server keeps no source. The page keeps the visitor's code in the browser's `localStorage`; Share puts the deflated source in the link's `#code=` fragment (`#src=`, plain base64url, in browsers without deflate-raw).
+- The page keeps the visitor's code in the browser's `localStorage` (edits to each example too, until Reset example). The server keeps source only when Share asks it to: `POST /api/share` stores it under `PLAY_SHARES` as `<id>.rok`, the id being the first 50 bits of its SHA-256 in base32, and `/p/<id>` opens the page with it. A stored file is never rewritten, compiled or run by the server. When the server cannot store it, Share puts the deflated source in the link's `#code=` fragment instead (`#src=`, plain base64url, in browsers without deflate-raw).
+- An example has its own address, `/#example=<name>` (its file name in `static/examples/`, without `.rok`). A link's or a share's address lasts until the first edit; then the address goes back to `/`.
 - Compiled modules are cached by SHA-256 of level + source.
 
 ## Run it locally
@@ -32,7 +33,7 @@ git commit -am "chore: bump the web kit"
 
 ## Link previews
 
-`static/index.html` points og:image and twitter:image at `og.png?v=dev`; the server puts the first 10 hex digits of og.png's SHA-256 (hashed at start) in place of `dev`, so a new image is a new URL, and caches `og.png` at that `?v=` for a year (`immutable`), anything else for an hour. When only a page's text changes, the cached card stays: re-scrape it with the [Facebook Sharing Debugger](https://developers.facebook.com/tools/debug/), the [LinkedIn Post Inspector](https://www.linkedin.com/post-inspector/) or Kakao's [sharing debugger](https://developers.kakao.com/tool/debugger/sharing) (clear the cache); X has no tool and refreshes in about 7 days.
+`static/index.html` points og:image and twitter:image at `og.png?v=dev`; the server puts the first 10 hex digits of og.png's SHA-256 (hashed at start) in place of `dev`, so a new image is a new URL. Pages name their stylesheets and scripts the same way (`/play.js?v=<first 10 hex digits of its SHA-256>`, filled in per request). A file asked for by its current `?v=` is cached for a year (`immutable`); a page for five minutes; anything else is revalidated each time. Every file answer carries an ETag of its content and answers `If-None-Match` with 304. When only a page's text changes, the cached card stays: re-scrape it with the [Facebook Sharing Debugger](https://developers.facebook.com/tools/debug/), the [LinkedIn Post Inspector](https://www.linkedin.com/post-inspector/) or Kakao's [sharing debugger](https://developers.kakao.com/tool/debugger/sharing) (clear the cache); X has no tool and refreshes in about 7 days.
 
 ## Settings
 
@@ -49,8 +50,11 @@ Environment variables:
 | `PLAY_JOBS` | `2` | Compiles at a time |
 | `PLAY_TIMEOUT` | `20` | Seconds a compile may take |
 | `PLAY_RATE` | `30` | Compiles a minute per client |
+| `PLAY_SHARES` | `<PLAY_WORK>/shares` | Stored share links; must be writable and should outlive restarts |
+| `PLAY_SHARE_RATE` | `10` | Share links a minute per client |
+| `PLAY_SHARE_MAX` | `100000` | Share links kept; past it new ones are refused (Share falls back to `#code=`) |
 
-The compile API is `POST /api/compile?opt=0` (body: UTF-8 source, max 64 KiB) returning `application/wasm`, or rokc's diagnostics as text with an `X-Rok-Diagnostics: 1` header (both 200; 4xx/5xx only for the request itself). `POST /api/fmt` takes the same body and returns it as `rokc fmt` lays it out (run in a job directory under `PLAY_WRAP`, like a build, stopped after 5 s), or its diagnostics the same way; see `src/main.rok`. Other paths answer 404 with `static/404.html`.
+The compile API is `POST /api/compile?opt=0` (body: UTF-8 source, max 64 KiB) returning `application/wasm`, or rokc's diagnostics as text with an `X-Rok-Diagnostics: 1` header (both 200; 4xx/5xx only for the request itself). `POST /api/fmt` takes the same body and returns it as `rokc fmt` lays it out (run in a job directory under `PLAY_WRAP`, like a build, stopped after 5 s), or its diagnostics the same way. `POST /api/share` takes the same body and returns the short link's id (`GET /api/share/<id>` gives the source back, `/p/<id>` the page); see `src/main.rok`. Other paths answer 404 with `static/404.html`.
 
 ## Deploy (Linux)
 
