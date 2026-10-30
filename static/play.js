@@ -1,6 +1,7 @@
 // The playground page: an editor with highlighting, the compile request,
-// a worker that runs the module, examples, and share links (the code
-// lives in the link's #fragment, deflated).
+// a worker that runs the module, examples, and share links (a short
+// /p/<id> link the server stores, else the code deflated in the link's
+// #fragment).
 
 const $ = (id) => document.getElementById(id);
 const ed = $("editor");
@@ -283,9 +284,10 @@ ed.addEventListener("keydown", (ev) => {
 
 
 // What the editor shows: the visitor's own code ("mine", kept in
-// localStorage "play.mine"), code from a share link ("link"), or an
-// example. Picking an example never touches "mine"; edits to an
-// example last until the next pick.
+// localStorage "play.mine"), code from a share link ("link", kept in
+// "play.link"), or an example. Picking an example never touches "mine";
+// edits to an example are kept per example ("play.ex.<name>") until
+// Reset example puts it back.
 
 const EXAMPLES = [
   ["hello", "Hello, world"], ["sums", "Sum types and match"], ["none", "T | none and ??"],
@@ -294,10 +296,12 @@ const EXAMPLES = [
 ];
 for (const [file, label] of EXAMPLES) pick.append(new Option(label, file));
 pick.append(new Option("Your code", "mine"));
+const NAMES = new Set(EXAMPLES.map(([file]) => file));
 
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
 };
 const texts = new Map();
 async function exampleText(file) {
@@ -308,13 +312,29 @@ async function exampleText(file) {
 let view = "mine";
 let mine = "";
 let linked = null;
+const resetBtn = $("reset");
+
+// The example a #example=<name> address names, or null.
+function exampleIn(hash) {
+  const m = hash.match(/^#example=([\w-]+)(?:&|$)/);
+  return m && NAMES.has(m[1]) ? m[1] : null;
+}
+// The address of a view: an example by name, else the bare page. A
+// share's or a link's address stays until the first edit.
+function addressFor(v) { return NAMES.has(v) ? `/#example=${v}` : "/"; }
+function syncAddress() {
+  const to = addressFor(view);
+  if (location.pathname + location.search + location.hash !== to) history.replaceState(null, "", to);
+}
 
 // Untouched Hello world is still Hello world, not "Your code".
 function syncPick() {
   pick.value = view === "mine" && ed.value === texts.get("hello") ? "hello" : view;
+  resetBtn.hidden = !(NAMES.has(view) && texts.has(view) && ed.value !== texts.get(view));
 }
 function show(text, v) {
   view = v;
+  if (v === "mine" || v === "link") store.set("play.view", v);
   ed.value = text;
   diags = [];
   hideTip();
@@ -327,14 +347,47 @@ function show(text, v) {
 }
 function keep() {
   if (view === "mine") { mine = ed.value; store.set("play.mine", mine); }
-  else if (view === "link") linked = ed.value;
+  else if (view === "link") { linked = ed.value; store.set("play.link", linked); }
+  else if (ed.value === texts.get(view)) store.del(`play.ex.${view}`);
+  else store.set(`play.ex.${view}`, ed.value);
   syncPick();
+  syncAddress();
+}
+function addLinkOption() {
+  if (![...pick.options].some((o) => o.value === "link")) pick.add(new Option("Code from the link", "link"), pick.options[EXAMPLES.length]);
+}
+// An example as last edited here, and what it prints.
+async function showExample(name) {
+  const orig = await exampleText(name);
+  show(store.get(`play.ex.${name}`) ?? orig, name);
+  run(true);
 }
 pick.addEventListener("change", async () => {
   const v = pick.value;
   if (v === "mine") show(mine, "mine");
   else if (v === "link") show(linked, "link");
-  else { show(await exampleText(v), v); run(true); }
+  else await showExample(v);
+  syncAddress();
+});
+// Reset example goes in as one edit, so Undo brings the edits back.
+resetBtn.addEventListener("click", () => {
+  const orig = texts.get(view);
+  if (orig === undefined) return;
+  ed.focus({ preventScroll: true });
+  ed.select();
+  if (!document.execCommand("insertText", false, orig)) { ed.value = orig; ed.dispatchEvent(new Event("input")); }
+  ed.setSelectionRange(0, 0);
+  ed.scrollTop = ed.scrollLeft = 0;
+  sync();
+  showPos();
+});
+// An address typed or pasted over this page's: an example opens here, a
+// link's code goes through the start-up below.
+addEventListener("hashchange", () => {
+  const ex = exampleIn(location.hash);
+  if (ex) showExample(ex);
+  else if (/^#(code|src)=/.test(location.hash)) location.reload();
+  else if (/^#example=/.test(location.hash)) syncAddress();
 });
 
 // The code in the link: #code= is the deflated source; #src= the plain
@@ -403,9 +456,18 @@ function flash(text) {
   clearTimeout(shareBtn.reset);
   shareBtn.reset = setTimeout(() => { shareBtn.textContent = "Share"; }, 2000);
 }
+// A short /p/<id> link the server stores; without one (offline, rate
+// limited, no store), the code in the link itself.
+async function shortLink(src, q) {
+  const res = await fetch("/api/share", { method: "POST", body: src, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  const id = res.ok ? (await res.text()).trim() : "";
+  if (!/^[a-z2-7]{10}$/.test(id)) throw new Error(`HTTP ${res.status}`);
+  return `${location.origin}/p/${id}${q ? `#${q}` : ""}`;
+}
 shareBtn.addEventListener("click", async () => {
-  const q = opt.value !== "0" ? `&opt=${opt.value}` : "";
-  const link = pack(ed.value).then((frag) => `${location.origin}${location.pathname}#${frag}${q}`);
+  const q = opt.value !== "0" ? `opt=${opt.value}` : "";
+  const src = ed.value;
+  const link = shortLink(src, q).catch(() => pack(src).then((frag) => `${location.origin}/#${frag}${q ? `&${q}` : ""}`));
   const copied = await copyText(link);
   let url;
   try { url = await link; } catch { flash("Share failed"); return; }
@@ -751,29 +813,42 @@ optLabels();
 // The skip link puts the caret in the editor, not just the scroll.
 document.querySelector(".skip").addEventListener("click", (ev) => { ev.preventDefault(); ed.focus(); });
 
-// Start: the visitor's code (or Hello world), then a link's code. A
-// link replaces "mine" only while mine is empty or untouched Hello world.
+// Start: the visitor's code (or Hello world), then a link's code (a
+// /p/<id> page carries it in #shared) or a #example=<name>. A link
+// replaces "mine" only while mine is empty or untouched Hello world.
 
 (async () => {
   const om = location.hash.match(/[#&]opt=([02])/);
   if (om) opt.value = om[1];
+  const was = store.get("play.view");
   mine = store.get("play.mine") ?? store.get("play.code") ?? "";
-  try { localStorage.removeItem("play.code"); } catch {}
+  store.del("play.code");
   if (mine) { store.set("play.mine", mine); show(mine, "mine"); }
+  linked = store.get("play.link");
+  if (linked !== null) addLinkOption();
   const hello = await exampleText("hello");
+  const pre = $("shared");
   const m = location.hash.match(/^#(code|src)=([\w-]+)/);
-  if (m) {
-    let text = null;
+  const ex = exampleIn(location.hash);
+  let text = null, open = was === "link" && linked !== null ? "link" : "mine";
+  if (pre) text = pre.textContent;
+  else if (m) {
     if (m[1] === "code" && !can("DecompressionStream")) say("this browser cannot open this link; try a newer one", "bad");
     else try { text = await unpack(m[1], m[2]); } catch { say("the link's code is damaged", "bad"); }
-    if (text !== null && text !== mine) {
+  }
+  if (text !== null) {
+    open = "mine";
+    if (text !== mine) {
       if (!mine || mine === hello) { mine = text; store.set("play.mine", mine); }
-      else { linked = text; pick.add(new Option("Code from the link", "link"), pick.options[EXAMPLES.length]); }
+      else { linked = text; store.set("play.link", linked); addLinkOption(); open = "link"; }
     }
   }
   if (!mine) mine = hello;
-  if (linked !== null) show(linked, "link");
-  else if (ed.value !== mine) show(mine, "mine");
+  // An unknown example opens what a bare address would, quietly.
+  if (/^#example=/.test(location.hash) && !ex) history.replaceState(null, "", "/");
+  if (text === null && ex) { await showExample(ex); return; }
+  if (open === "link") show(linked, "link");
+  else if (ed.value !== mine || view !== "mine") show(mine, "mine");
   else syncPick();
   // An example shows what it prints straight away; the visitor's own
   // code and a link's wait for Run.

@@ -61,8 +61,9 @@
 </header>
 <div class="sharebar t-small" id="sharebar" hidden><label for="share-url">Copy this link:</label><input id="share-url" class="mono" type="url" readonly><button class="lk" type="button" id="share-close">Close</button></div>
 <main class="ws" id="content">
+<h1 class="sr-only">Rok Playground</h1>
 <section class="pane ed-pane" aria-label="Source">
-<div class="ph"><span class="file mono">main.rok</span></div>
+<div class="ph"><span class="file mono">main.rok</span><button class="lk" type="button" id="reset" hidden title="Put the example back as it was (Undo brings your edits back)">Reset example</button></div>
 <div class="ed">
 <ol class="gutter mono" aria-hidden="true"></ol>
 <div class="ed-body">
@@ -79,7 +80,7 @@
 <section class="pane out-pane" aria-label="Output">
 <div class="ph"><span class="lbl">Output</span><span class="meta mono" id="status" role="status" aria-live="polite"></span><button class="lk" type="button" id="copy-out" disabled>Copy</button><button class="lk" type="button" id="clear">Clear</button></div>
 <pre class="out mono" id="out" tabindex="0" aria-label="Program output"></pre>
-<p class="note">Compiled to WebAssembly on the server, run in your browser. One file of up to 64 KiB; no files, network or threads; a run stops after 10 s. Your code stays in this browser; Share puts it in the link.</p>
+<p class="note">Compiled to WebAssembly on the server, run in your browser. One file of up to 64 KiB; no files, network or threads; a run stops after 10 s. Your code stays in this browser until you press Share, which stores a copy on the server for a short link.</p>
 </section>
 </main>
 <script type="module" src="/play.js"></script>
