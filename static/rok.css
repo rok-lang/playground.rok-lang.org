@@ -1,51 +1,81 @@
 /* Rok web: shared tokens and components for rok-lang.org, docs, rokstones.io and the playground. See docs/tokens.md. */
 
-/* theme: .rk.lt or .rk.dk sets color-scheme, every light-dark() pair follows */
+/* theme: .rk is light, .rk.dk dark; plain values, so browsers without
+   light-dark() (iOS < 17.5, Samsung Internet < 27) still get colours */
 .rk{color-scheme:light}
 .rk.dk{color-scheme:dark}
 .rk{
   /* surfaces */
-  --bg:light-dark(oklch(0.988 0.002 286),oklch(0.145 0.006 270));
-  --bg-2:light-dark(oklch(0.965 0.003 286),oklch(0.175 0.007 270));
-  --panel:light-dark(#ffffff,oklch(0.195 0.008 270));
-  --code:light-dark(oklch(0.972 0.003 286),oklch(0.17 0.007 270));
-  --term:light-dark(#ffffff,oklch(0.11 0.005 270));
+  --bg:#fbfbfc;
+  --bg-2:#f3f3f5;
+  --panel:#ffffff;
+  --code:#f5f5f8;
+  --term:#ffffff;
   /* text */
-  --ink:light-dark(oklch(0.2 0.01 275),oklch(0.95 0.005 275));
-  --ink-2:light-dark(oklch(0.44 0.015 275),oklch(0.74 0.012 275));
-  --ink-3:light-dark(oklch(0.53 0.015 275),oklch(0.6 0.012 275));
+  --ink:#15161b;
+  --ink-2:#50525b;
+  --ink-3:#696b75;
   --term-ink:var(--ink);
   /* lines */
-  --line:light-dark(oklch(0.92 0.004 286),oklch(0.25 0.008 270));
-  --line-2:light-dark(oklch(0.86 0.006 286),oklch(0.32 0.01 270));
+  --line:#e4e4e7;
+  --line-2:#d0d0d5;
   /* accent and links */
-  --acc:light-dark(oklch(0.52 0.19 357),oklch(0.83 0.1 350));
-  --acc-bg:light-dark(oklch(0.96 0.025 350),oklch(0.24 0.045 350));
-  --link:light-dark(oklch(0.5 0.13 240),oklch(0.83 0.1 225));
-  --btn:light-dark(oklch(0.2 0.01 275),oklch(0.83 0.1 350));
-  --btn-ink:light-dark(#ffffff,oklch(0.22 0.06 350));
+  --acc:#b6226a;
+  --acc-bg:#ffebf4;
+  --link:#006aa5;
+  --btn:#15161b;
+  --btn-ink:#ffffff;
   /* note callout */
-  --note-bg:light-dark(oklch(0.97 0.02 230),oklch(0.2 0.03 235));
-  --note-line:light-dark(oklch(0.88 0.05 230),oklch(0.32 0.05 235));
-  --note-ink:light-dark(oklch(0.45 0.12 240),oklch(0.83 0.1 225));
+  --note-bg:#e8f8ff;
+  --note-line:#b7def3;
+  --note-ink:#005b90;
   /* syntax: keyword, type, string, number, comment */
-  --k:light-dark(oklch(0.52 0.19 357),oklch(0.83 0.1 350));
-  --t:light-dark(oklch(0.5 0.13 240),oklch(0.83 0.1 225));
-  --s:light-dark(oklch(0.5 0.12 140),oklch(0.83 0.13 135));
-  --n:light-dark(oklch(0.54 0.13 65),oklch(0.84 0.12 80));
-  --c:light-dark(oklch(0.54 0.012 275),oklch(0.6 0.012 275));
+  --k:#b6226a;
+  --t:#006aa5;
+  --s:#3a732c;
+  --n:#a15b00;
+  --c:#6c6e76;
   /* rokc terminal colours, darkened on white so they pass contrast */
-  --cli-sky:light-dark(oklch(0.5 0.13 240),#38bdf8);
-  --cli-red:light-dark(#c42b2b,#ff6b6b);
-  --cli-amber:light-dark(#a16207,#e0b057);
+  --cli-sky:#006aa5;
+  --cli-red:#c42b2b;
+  --cli-amber:#a16207;
   /* the mark: never themed, never used for text */
   --mark:#f9a8d4;
   /* focus ring: 3:1 or more on every ground */
-  --focus:light-dark(oklch(0.52 0.19 357),#f9a8d4);
+  --focus:#b6226a;
   --sans:"Geist","Pretendard Variable","Pretendard",system-ui,sans-serif;
   --mono:"Geist Mono","Pretendard Variable","Pretendard",ui-monospace,monospace;
   font-family:var(--sans);font-size:16px;line-height:26px;background:var(--bg);color:var(--ink);
   font-feature-settings:"ss01","cv11";-webkit-font-smoothing:antialiased;
+}
+.rk.dk{
+  --bg:#090a0d;
+  --bg-2:#0f1014;
+  --panel:#131519;
+  --code:#0e0f13;
+  --term:#040406;
+  --ink:#edeef2;
+  --ink-2:#a8aab3;
+  --ink-3:#7e8088;
+  --line:#202126;
+  --line-2:#313338;
+  --acc:#f9add0;
+  --acc-bg:#2f1622;
+  --link:#7ad5f8;
+  --btn:#f9add0;
+  --btn-ink:#2e0d1e;
+  --note-bg:#071822;
+  --note-line:#163749;
+  --note-ink:#7ad5f8;
+  --k:#f9add0;
+  --t:#7ad5f8;
+  --s:#a2da83;
+  --n:#f4c26a;
+  --c:#7e8088;
+  --cli-sky:#38bdf8;
+  --cli-red:#ff6b6b;
+  --cli-amber:#e0b057;
+  --focus:#f9a8d4;
 }
 .rk a{color:var(--link);text-decoration:none}
 .rk a:hover{text-decoration:underline;text-underline-offset:3px}
@@ -106,7 +136,7 @@
 .cb-h .t-label{flex:1;font-family:var(--mono);font-size:12px;line-height:18px;font-weight:400;color:var(--ink-3);letter-spacing:0}
 .cb pre,.pre{font-family:var(--mono);font-size:14px;line-height:22px;padding:14px 16px;overflow-x:auto;margin:0}
 .ln{display:block;margin:0 -16px;padding:0 16px}
-.ln.hl{background:color-mix(in oklch,var(--acc) 10%,transparent);box-shadow:inset 2px 0 0 var(--acc)}
+.ln.hl{background:var(--acc-bg);box-shadow:inset 2px 0 0 var(--acc)}
 
 /* terminal and program output: follow the theme, white on light pages */
 .term{background:var(--term);color:var(--term-ink);border:1px solid var(--line);font-family:var(--mono);font-size:13px;line-height:21px;padding:14px 16px}
@@ -120,7 +150,12 @@
 /* callouts: the compiler's own labels (note, help, warning) */
 .callout{display:flex;gap:12px;border:1px solid var(--note-line);background:var(--note-bg);border-radius:6px;padding:14px 16px;font-size:15px;line-height:24px}
 .callout .lab{font-family:var(--mono);font-size:12px;line-height:24px;color:var(--note-ink);font-weight:500;flex:none}
-.callout.help{border-color:color-mix(in oklch,var(--acc) 35%,var(--line));background:var(--acc-bg)}
+.callout.help{border-color:var(--acc);background:var(--acc-bg)}
+/* var() inside color-mix() fails at computed time, so guard it */
+@supports (color:color-mix(in oklch,red,blue)){
+  .ln.hl{background:color-mix(in oklch,var(--acc) 10%,transparent)}
+  .callout.help{border-color:color-mix(in oklch,var(--acc) 35%,var(--line))}
+}
 .callout.help .lab{color:var(--acc)}
 
 /* docs shell */
