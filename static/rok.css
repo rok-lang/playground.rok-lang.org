@@ -138,6 +138,9 @@
 .prose{display:flex;flex-direction:column;gap:18px;max-width:700px}
 .prose h2{margin-top:22px}
 
+/* iOS zooms into any field under 16px on focus */
+@media (max-width:767px){.rk input,.rk select,.rk textarea{font-size:16px}}
+
 /* social links: brand icons, labelled */
 .social{display:flex;gap:2px;align-items:center}
 .social a{display:inline-flex;padding:6px;border-radius:6px;color:var(--ink-3);line-height:0}
