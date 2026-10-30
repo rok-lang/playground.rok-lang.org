@@ -6,6 +6,9 @@
 //                               diagnostics as text with an
 //                               `X-Rok-Diagnostics: 1` header; 400 / 413 /
 //                               429 / 503 / 504 for the request itself.
+//   POST /api/fmt               body: the same. 200: the source as
+//                               `rokc fmt` lays it out, or its
+//                               diagnostics (header as above).
 //   GET  /...                   static/, then the web kit's files
 //                               (web/, built in), then PLAY_SITE, and
 //                               /rok.mjs
@@ -13,7 +16,8 @@
 // Each compile runs `rokc build --target=wasm32-unknown-unknown` in a
 // fresh directory with a clean environment, under PLAY_WRAP (a sandbox
 // command line such as bwrap's, see README.md), killed after
-// PLAY_TIMEOUT seconds. Finished modules are cached by the SHA-256 of
+// PLAY_TIMEOUT seconds; `rokc fmt` the same way, under FMT_TIMEOUT.
+// Finished modules are cached by the SHA-256 of
 // level and source, so a shared link compiles once.
 //
 // Settings come from the environment:
@@ -54,6 +58,8 @@ const MAX_DIAG: usize = 65536;
 /// The most a returned module may be (bytes); a 64 KiB source cannot
 /// honestly produce more, so a larger output is refused.
 const MAX_WASM: u64 = 33554432u64;
+/// Seconds `rokc fmt` may take: it only lexes and re-indents.
+const FMT_TIMEOUT: u64 = 5u64;
 
 static ACTIVE: Atomic<i64> = Atomic::new(0i64);
 static JOBS: Atomic<i64> = Atomic::new(0i64);
@@ -251,12 +257,15 @@ fn run_rokc(cfg: Cfg, src: str, opt: str, key: str) -> Resp {
     resp
 }
 
-fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
-    try fs::write(dir + "/main.rok", src) catch e { return text(500, f"work directory: {e}"); };
+/// Runs `rokc <args>` in `dir` under the sandbox, its output in
+/// `dir/rokc.log`: whether it succeeded, or the answer when it could not
+/// run or took longer than `secs`.
+fn run_tool(cfg: Cfg, dir: str, args: List<str>, secs: u64, what: str) -> bool | Resp {
     let log = try fs::create(dir + "/rokc.log") catch e { return text(500, f"work directory: {e}"); };
     let argv: List<str> = List::new();
     for w in words(cfg.wrap) { argv.push(w); }
-    for a in [cfg.rokc, "build", "--target=wasm32-unknown-unknown", "-O" + opt, "--target-dir", "t", "main.rok", "-o", "main.wasm"] { argv.push(a); }
+    argv.push(cfg.rokc);
+    for a in args { argv.push(a); }
     // A clean environment: no ROK_* / ROKC_* settings reach rokc, and
     // its home and caches are the job's own directory.
     let cmd = Command::new(argv[0]).args(argv[1:argv.len()].to_list()).current_dir(dir).env_clear()
@@ -265,23 +274,26 @@ fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
         .stdin(Stdio::Null).stdout(Stdio::File(log)).stderr(Stdio::File(log)).kill_on_drop(true);
     let child = try cmd.spawn() catch e { return text(500, f"cannot start rokc: {e}"); };
     let t0 = Instant::now();
-    let limit = (cfg.timeout as i64) * 1000i64;
-    let code = 0i32;
+    let limit = (secs as i64) * 1000i64;
     loop {
         let st = try child.try_wait() catch e { return text(500, f"rokc: {e}"); };
-        if let s: rok::std::process::ExitStatus = st {
-            code = if s.success() { 0i32 } else { 1i32 };
-            break;
-        }
+        if let s: rok::std::process::ExitStatus = st { return s.success(); }
         if t0.elapsed().as_ms() > limit {
             try child.kill() catch _ {};
             try child.wait() catch _ {};
-            return text(504, f"Compiling took longer than {cfg.timeout} s and was stopped.");
+            return text(504, f"{what} took longer than {secs} s and was stopped.");
         }
         thread::sleep(Duration::ms(25));
     }
+}
+
+fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
+    try fs::write(dir + "/main.rok", src) catch e { return text(500, f"work directory: {e}"); };
+    let ran = run_tool(cfg, dir, ["build", "--target=wasm32-unknown-unknown", "-O" + opt, "--target-dir", "t", "main.rok", "-o", "main.wasm"], cfg.timeout, "Compiling");
+    if let r: Resp = ran { return r; }
+    let ok = if let b: bool = ran { b } else { false };
     let err = try fs::read_to_str(dir + "/rokc.log") catch _ { "" };
-    if code != 0 || !fs::exists(dir + "/main.wasm") {
+    if !ok || !fs::exists(dir + "/main.wasm") {
         let diag = tidy(err, dir);
         return diagnostics(if diag.len() > MAX_DIAG { diag[:MAX_DIAG] + "\n... (truncated)\n" } else { diag });
     }
@@ -297,6 +309,41 @@ fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
     if n >= MAX_CACHED { try fs::remove_dir_all(cfg.work + "/cache") catch _ {}; try fs::create_dir_all(cfg.work + "/cache") catch _ {}; }
     try fs::rename(dir + "/main.wasm", cfg.work + "/cache/" + key + ".wasm") catch _ {};
     Resp { status: 200, headers: ["Content-Type: application/wasm", "Cache-Control: no-store", "X-Rok-Cache: miss"], body: wasm }
+}
+
+/// `rokc fmt` on the source, in a job directory of its own: the source
+/// laid out, or why not. rokc fmt only lexes the one file it is given,
+/// but it runs sandboxed like a build all the same.
+fn format(cfg: Cfg, src: str) -> Resp {
+    if JOBS.fetch_add(1i64) >= cfg.jobs {
+        JOBS.fetch_sub(1i64);
+        return text(503, "The compile server is busy; try again in a moment.");
+    }
+    let dir = f"{cfg.work}/jobs/{rok::std::process::id()}-{SEQ.fetch_add(1i64)}";
+    let r = format_in(cfg, src, dir);
+    try fs::remove_dir_all(dir) catch _ {};
+    JOBS.fetch_sub(1i64);
+    r
+}
+
+fn format_in(cfg: Cfg, src: str, dir: str) -> Resp {
+    try fs::create_dir_all(dir) catch e { return text(500, f"work directory: {e}"); };
+    try fs::write(dir + "/main.rok", src) catch e { return text(500, f"work directory: {e}"); };
+    let ran = run_tool(cfg, dir, ["fmt", "main.rok"], FMT_TIMEOUT, "Formatting");
+    if let r: Resp = ran { return r; }
+    let ok = if let b: bool = ran { b } else { false };
+    if !ok {
+        // rokc fmt names the file `<fmt>`; here it is main.rok.
+        let err = (try fs::read_to_str(dir + "/rokc.log") catch _ { "" }).replace("<fmt>:", "main.rok:");
+        let diag = tidy(err, dir);
+        return diagnostics(if diag.len() > MAX_DIAG { diag[:MAX_DIAG] + "\n... (truncated)\n" } else { diag });
+    }
+    // Layout only re-indents, so the result is about the source's size;
+    // never follow a planted symlink, never return much more.
+    let md = try fs::symlink_metadata(dir + "/main.rok") catch e { return text(500, f"rokc output: {e}"); };
+    if !md.is_file() || md.len() > (MAX_SOURCE * 4) as u64 { return diagnostics("rokc fmt did not leave a usable file\n"); }
+    let out = try fs::read_to_str(dir + "/main.rok") catch e { return diagnostics(f"rokc fmt output: {e}\n"); };
+    text(200, out)
 }
 
 // ---- routes ----
@@ -371,6 +418,12 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
         if let why: str = refused(r.body) { return diagnostics(why); }
         return compile(cfg, r.body, opt);
     }
+    if p == "/api/fmt" {
+        if r.method != "POST" { return text(405, "POST the source to /api/fmt."); }
+        if !allow(client_of(s, r, cfg.client_header), cfg.rate) { return text(429, f"More than {cfg.rate} requests a minute; wait a little."); }
+        if r.body.trim().is_empty() { return text(400, "Nothing to format."); }
+        return format(cfg, r.body);
+    }
     if r.method != "GET" && r.method != "HEAD" { return text(405, "Only GET here."); }
     if p == "/rok.mjs" && !cfg.mjs.is_empty() {
         if let f: Resp = file_resp(cfg.mjs) { return f; }
@@ -381,6 +434,17 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
     if let x: Resp = site_file(cfg, "static", p, r.query) { return x; }
     if let k: Resp = kit_resp(p) { return k; }
     if let x: Resp = site_file(cfg, cfg.site, p, r.query) { return x; }
+    not_found(cfg, p)
+}
+
+/// 404: the page with the site's chrome, or plain text under /api/.
+fn not_found(cfg: Cfg, p: str) -> Resp {
+    if !p.starts_with("/api/") {
+        if let x: Resp = page_resp(cfg, "static/404.html") {
+            x.status = 404;
+            return x;
+        }
+    }
     text(404, "Not found.")
 }
 
@@ -469,4 +533,25 @@ fn compile_errors_are_answers() {
     let css = kit_resp("/rok.css") ?? panic("no /rok.css");
     expect(css.headers[0] == "Content-Type: text/css; charset=utf-8" && css.body.len() > 0, "kit file");
     expect(kit_resp("/theme-init.js") is Resp && kit_resp("/play.js") is none, "kit names only");
+    expect(body_of(page).contains("class=\"seg\"") && body_of(page).contains("class=\"social\""), "menu");
+
+    let lost = not_found(cfg, "/nope");
+    expect(lost.status == 404 && body_of(lost).contains("Back to the playground") && !body_of(lost).contains("<!--web:"), "404 page");
+    expect(not_found(cfg, "/api/nope").status == 404 && body_of(not_found(cfg, "/api/nope")) == "Not found.", "404 api");
+}
+
+/// Format answers the file rokc fmt left, or its diagnostics.
+#[test]
+fn format_answers() {
+    let work = f"{env::temp_dir()}/rok-playground-fmt-{rok::std::process::id()}";
+    try fs::create_dir_all(work + "/jobs") catch e { panic(f"{e}"); };
+    try fs::write(work + "/ok.sh", "printf 'fn main() {\\n    f();\\n}\\n' > main.rok\n") catch e { panic(f"{e}"); };
+    try fs::write(work + "/bad.sh", "echo 'error[E001]: <fmt>:2:1: unterminated string literal' >&2\nexit 1\n") catch e { panic(f"{e}"); };
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/ok.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", og: "dev" };
+    let ok = format(cfg, "fn main() {\nf();\n}\n");
+    cfg.rokc = work + "/bad.sh";
+    let bad = format(cfg, "fn main() {\n\"\n");
+    try fs::remove_dir_all(work) catch _ {};
+    expect(ok.status == 200 && !ok.headers.contains("X-Rok-Diagnostics: 1") && body_of(ok) == "fn main() {\n    f();\n}\n", "formatted");
+    expect(bad.status == 200 && bad.headers.contains("X-Rok-Diagnostics: 1") && body_of(bad).contains("main.rok:2:1"), "fmt diagnostics");
 }

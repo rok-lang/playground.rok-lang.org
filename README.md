@@ -22,7 +22,7 @@ Without `PLAY_WRAP` the server only listens on loopback: an unsandboxed rokc cou
 
 ## Web kit
 
-`web/` is [rok-lang/web](https://github.com/rok-lang/web), pinned to a commit. The server builds its `web` library in (`Dep::path("web/rok")`): HTTP, the canonical-address 301s, and the kit's files, served at `/rok.css`, `/theme.js` (also as `/theme-init.js`, its old name), `/logo.svg`, `/rok.svg`, `/favicon.ico` and `/apple-touch-icon.png`. `static/index.html` holds `<!--web:theme-button-->`, `<!--web:sites-->`, `<!--web:social-->` and `<!--web:theme-seg-->`, which the server fills from the kit's markup. Move to a newer kit with:
+`web/` is [rok-lang/web](https://github.com/rok-lang/web), pinned to a commit. The server builds its `web` library in (`Dep::path("web/rok")`): HTTP, the canonical-address 301s, and the kit's files, served at `/rok.css`, `/theme.js` (also as `/theme-init.js`, its old name), `/logo.svg`, `/rok.svg`, `/favicon.ico` and `/apple-touch-icon.png`. `static/index.html` and `static/404.html` hold `<!--web:theme-button-->`, `<!--web:sites-->`, `<!--web:social-->` and `<!--web:theme-seg-->`, which the server fills from the kit's markup (the sites, social links and theme switch go in the header and its menu). Move to a newer kit with:
 
 ```bash
 git submodule update --remote web
@@ -50,7 +50,7 @@ Environment variables:
 | `PLAY_TIMEOUT` | `20` | Seconds a compile may take |
 | `PLAY_RATE` | `30` | Compiles a minute per client |
 
-The compile API is `POST /api/compile?opt=0` (body: UTF-8 source, max 64 KiB) returning `application/wasm`, or rokc's diagnostics as text with an `X-Rok-Diagnostics: 1` header (both 200; 4xx/5xx only for the request itself); see `src/main.rok`.
+The compile API is `POST /api/compile?opt=0` (body: UTF-8 source, max 64 KiB) returning `application/wasm`, or rokc's diagnostics as text with an `X-Rok-Diagnostics: 1` header (both 200; 4xx/5xx only for the request itself). `POST /api/fmt` takes the same body and returns it as `rokc fmt` lays it out (run in a job directory under `PLAY_WRAP`, like a build, stopped after 5 s), or its diagnostics the same way; see `src/main.rok`. Other paths answer 404 with `static/404.html`.
 
 ## Deploy (Linux)
 
@@ -72,8 +72,8 @@ Tune with `PLAY_IMAGE`, `PLAY_MEM` (default `4g`), `PLAY_CPUS` (default `2`); th
 
 | File | Contents |
 |---|---|
-| `src/main.rok` | Settings, compile API (job dir, sandbox, time limit, cache, rate limit), static files, the kit's files and markup |
-| `static/` | `index.html`, `play.js`, `run.js` (the worker), `play.css`, `examples/*.rok`, `og.png` |
+| `src/main.rok` | Settings, compile and format API (job dir, sandbox, time limit, cache, rate limit), static files, the kit's files and markup, the 404 page |
+| `static/` | `index.html`, `404.html`, `play.js`, `run.js` (the worker), `play.css`, `examples/*.rok`, `og.png` |
 | `web/` | the web kit (submodule): `rok.css`, `theme.js`, the marks and icons, and the `web` library (HTTP, addresses) |
 | `scripts/og.html` | Source of `static/og.png` |
 | `scripts/` | `Dockerfile` + `docker-sandbox.sh` (recommended), `sandbox.sh` (bubblewrap) |
