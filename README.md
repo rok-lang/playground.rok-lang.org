@@ -8,15 +8,27 @@ Source for https://playground.rok-lang.org, the browser playground for Rok. The 
 
 ## Run it locally
 
-Needs a Rok toolchain with the `wasm32-unknown-unknown` runtime (release archives ship it; from source, `targets/build.sh wasm32-unknown-unknown`).
+Needs a Rok toolchain with the `wasm32-unknown-unknown` runtime (release archives ship it; from source, `targets/build.sh wasm32-unknown-unknown`), and the [web kit](https://github.com/rok-lang/web) submodule at `web/`:
 
 ```bash
+git clone --recurse-submodules https://github.com/rok-lang/playground.rok-lang.org.git
+cd playground.rok-lang.org      # or, in a clone made without it: git submodule update --init
 rok build
 PLAY_ROKC=~/.rok/toolchains/<version>-aarch64-apple-darwin/bin/rokc ./target/debug/rok_playground
 # http://127.0.0.1:8405
 ```
 
 Without `PLAY_WRAP` the server only listens on loopback: an unsandboxed rokc could be made to read the machine's files.
+
+## Web kit
+
+`web/` is [rok-lang/web](https://github.com/rok-lang/web), pinned to a commit. The server builds its `web` library in (`Dep::path("web/rok")`): HTTP, the canonical-address 301s, and the kit's files, served at `/rok.css`, `/theme.js` (also as `/theme-init.js`, its old name), `/logo.svg`, `/rok.svg`, `/favicon.ico` and `/apple-touch-icon.png`. `static/index.html` holds `<!--web:theme-button-->`, `<!--web:sites-->`, `<!--web:social-->` and `<!--web:theme-seg-->`, which the server fills from the kit's markup. Move to a newer kit with:
+
+```bash
+git submodule update --remote web
+rok build && rok test
+git commit -am "chore: bump the web kit"
+```
 
 ## Link previews
 
@@ -31,7 +43,7 @@ Environment variables:
 | `PLAY_ADDR` | `127.0.0.1:8405` | Where to listen |
 | `PLAY_ROKC` | `rokc` | The compiler (the toolchain's own `bin/rokc`, not the proxy) |
 | `PLAY_MJS` | `<rokc dir>/../lib/rok/targets/wasm32-unknown-unknown/rok.mjs` | JS host served at `/rok.mjs` |
-| `PLAY_SITE` | `../rok-lang.org/static` | Fallback for static files not in `static/` |
+| `PLAY_SITE` | `../rok-lang.org/static` | Fallback for static files in neither `static/` nor the kit |
 | `PLAY_WRAP` | (none) | Sandbox command rokc runs under (see Deploy) |
 | `PLAY_WORK` | `<temp>/rok-playground` | Job directories and module cache |
 | `PLAY_JOBS` | `2` | Compiles at a time |
@@ -60,8 +72,8 @@ Tune with `PLAY_IMAGE`, `PLAY_MEM` (default `4g`), `PLAY_CPUS` (default `2`); th
 
 | File | Contents |
 |---|---|
-| `src/main.rok` | Settings, compile API (job dir, sandbox, time limit, cache, rate limit), static files |
-| `src/http.rok` | HTTP/1.1, the same code as rokstones.io's `src/http.rok` |
-| `static/` | `index.html`, `play.js`, `run.js` (the worker), `play.css`, `rok.css` (copied from rok-lang/web), `examples/*.rok`, icons, `og.png` |
+| `src/main.rok` | Settings, compile API (job dir, sandbox, time limit, cache, rate limit), static files, the kit's files and markup |
+| `static/` | `index.html`, `play.js`, `run.js` (the worker), `play.css`, `examples/*.rok`, `og.png` |
+| `web/` | the web kit (submodule): `rok.css`, `theme.js`, the marks and icons, and the `web` library (HTTP, addresses) |
 | `scripts/og.html` | Source of `static/og.png` |
 | `scripts/` | `Dockerfile` + `docker-sandbox.sh` (recommended), `sandbox.sh` (bubblewrap) |

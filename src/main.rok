@@ -6,8 +6,9 @@
 //                               diagnostics as text with an
 //                               `X-Rok-Diagnostics: 1` header; 400 / 413 /
 //                               429 / 503 / 504 for the request itself.
-//   GET  /...                   static/, then the shared files of
-//                               rok-lang.org (PLAY_SITE), and /rok.mjs
+//   GET  /...                   static/, then the web kit's files
+//                               (web/, built in), then PLAY_SITE, and
+//                               /rok.mjs
 //
 // Each compile runs `rokc build --target=wasm32-unknown-unknown` in a
 // fresh directory with a clean environment, under PLAY_WRAP (a sandbox
@@ -28,8 +29,6 @@
 //                 or x-forwarded-for behind Caddy. Unset (the default),
 //                 the TCP peer is the client, so a client cannot forge it.
 
-mod http;
-
 use rok::std::env;
 use rok::std::fs;
 use rok::std::net;
@@ -40,7 +39,11 @@ use rok::std::time::Duration;
 use rok::core::crypto::HashAlgorithm;
 use rok::std::time::SystemTime;
 use rok::core::task::time::Instant;
-use http::Request;
+use web::chrome;
+use web::http;
+use web::http::Request;
+use web::kit;
+use web::url;
 
 const MAX_SOURCE: usize = 65536;
 const MAX_CONNS: i64 = 64;
@@ -311,14 +314,31 @@ fn file_resp(path: str) -> Resp | none {
     Resp { status: 200, headers: [f"Content-Type: {http::content_type(path)}", "Cache-Control: no-cache", CSP], body: data }
 }
 
-/// A page with the og:image version filled in: a new og.png is a new
-/// URL, so link previews refetch it.
+/// A file of the web kit, by its public path. `/theme-init.js` is the
+/// name theme.js had here before the kit; cached pages still ask for it.
+fn kit_resp(path: str) -> Resp | none {
+    let name = if path == "/theme-init.js" { "theme.js" } else { path[1:] };
+    let f = kit::find(kit::Mark::Rok, name) ?? { return none; };
+    let b: List<u8> = List::new();
+    for x in f.data { b.push(x); }
+    Resp { status: 200, headers: [f"Content-Type: {http::content_type(name)}", "Cache-Control: no-cache", CSP], body: b }
+}
+
+/// index.html's shared markup, from the kit's chrome: each
+/// `<!--web:name-->` placeholder replaced.
+fn fill(html: str) -> str {
+    let sites = chrome::Sites { home: "https://rok-lang.org", docs: "https://docs.rok-lang.org/latest", stones: "https://rokstones.io", playground: "/", current: "playground" };
+    html.replace("<!--web:theme-button-->", chrome::theme_button(false)).replace("<!--web:sites-->", chrome::sites_nav(sites)).replace("<!--web:social-->", chrome::SOCIAL).replace("<!--web:theme-seg-->", chrome::theme_seg(false))
+}
+
+/// A page with the og:image version and the shared markup filled in: a
+/// new og.png is a new URL, so link previews refetch it.
 fn page_resp(cfg: Cfg, path: str) -> Resp | none {
     let r = file_resp(path) ?? { return none; };
     if !path.ends_with(".html") { return r; }
     let html = try str::from_utf8(r.body[0:r.body.len()]) catch _ { return r; };
     let b: List<u8> = List::new();
-    for x in html.replace("og.png?v=dev", "og.png?v=" + cfg.og).as_bytes() { b.push(x); }
+    for x in fill(html.replace("og.png?v=dev", "og.png?v=" + cfg.og)).as_bytes() { b.push(x); }
     r.body = b;
     r
 }
@@ -330,6 +350,15 @@ fn og_cache(cfg: Cfg, query: str) -> str {
         if kv == "v=" + cfg.og && cfg.og != "dev" { return "Cache-Control: public, max-age=31536000, immutable"; }
     }
     "Cache-Control: public, max-age=3600"
+}
+
+/// The file under `root` that canonical path `p` names, as a page.
+fn site_file(cfg: Cfg, root: str, p: str, query: str) -> Resp | none {
+    let f = http::page_file(root, p) ?? { return none; };
+    let x = page_resp(cfg, f) ?? { return none; };
+    // headers[1] is file_resp's Cache-Control.
+    if p == "/og.png" { x.headers[1] = og_cache(cfg, query); }
+    x
 }
 
 fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
@@ -346,18 +375,12 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
     if p == "/rok.mjs" && !cfg.mjs.is_empty() {
         if let f: Resp = file_resp(cfg.mjs) { return f; }
     }
-    if let c: str = http::canonical(p) {
-        return Resp { status: 301, headers: [http::moved(c, r.query), "Cache-Control: public, max-age=3600"], body: List::new() };
+    if let c: str = url::canonical(p) {
+        return Resp { status: 301, headers: [url::moved(c, r.query), "Cache-Control: public, max-age=3600"], body: List::new() };
     }
-    for root in ["static", cfg.site] {
-        if let f: str = http::page_file(root, p) {
-            if let x: Resp = page_resp(cfg, f) {
-                // headers[1] is file_resp's Cache-Control.
-                if p == "/og.png" { x.headers[1] = og_cache(cfg, r.query); }
-                return x;
-            }
-        }
-    }
+    if let x: Resp = site_file(cfg, "static", p, r.query) { return x; }
+    if let k: Resp = kit_resp(p) { return k; }
+    if let x: Resp = site_file(cfg, cfg.site, p, r.query) { return x; }
     text(404, "Not found.")
 }
 
@@ -441,4 +464,9 @@ fn compile_errors_are_answers() {
     expect(og_cache(cfg, "") == "Cache-Control: public, max-age=3600" && og_cache(cfg, "v=x") == "Cache-Control: public, max-age=3600", "bare og");
     let page = page_resp(cfg, "static/index.html") ?? panic("no index.html");
     expect(body_of(page).contains("og.png?v=0123456789") && !body_of(page).contains("v=dev"), "og version in page");
+    expect(!body_of(page).contains("<!--web:"), "shared markup filled in");
+    expect(body_of(page).contains("data-theme-set=\"dark\"") && body_of(page).contains("<a href=\"/\" aria-current=\"page\">Playground</a>"), "footer");
+    let css = kit_resp("/rok.css") ?? panic("no /rok.css");
+    expect(css.headers[0] == "Content-Type: text/css; charset=utf-8" && css.body.len() > 0, "kit file");
+    expect(kit_resp("/theme-init.js") is Resp && kit_resp("/play.js") is none, "kit names only");
 }
