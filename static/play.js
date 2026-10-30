@@ -81,7 +81,7 @@ function sync() {
   hideTip();
 }
 
-ed.addEventListener("input", () => { diags = []; hideTip(); paint(); save(); });
+ed.addEventListener("input", () => { diags = []; hideTip(); paint(); keep(); });
 ed.addEventListener("scroll", sync);
 
 // Caret position, diagnostics count, and the diagnostic tooltip.
@@ -160,10 +160,21 @@ function showTip(d) {
   const box = ed.parentElement.getBoundingClientRect();
   let left = padL + (d.col - 1) * cellWidth() - ed.scrollLeft - 12;
   left = Math.max(8, Math.min(left, box.width - tip.offsetWidth - 8));
-  let top = padT + d.line * lh - ed.scrollTop + 6;
-  if (top + tip.offsetHeight > box.height - 8) top = padT + (d.line - 1) * lh - ed.scrollTop - tip.offsetHeight - 6;
   tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
+  tip.style.top = `${tipTop(d.line, tip.offsetHeight, box.height, lh, padT)}px`;
+}
+// Below the line, else above it, else past the run of marked lines it
+// sits in: never over another underlined line if there is room.
+function tipTop(line, h, room, lh, padT) {
+  const y = (n) => padT + (n - 1) * lh - ed.scrollTop;
+  const marked = new Set(diags.map((x) => x.line));
+  let a = line, b = line;
+  while (marked.has(a - 1)) a--;
+  while (marked.has(b + 1)) b++;
+  const fits = (t) => t >= 4 && t + h <= room - 4;
+  const clear = (t) => fits(t) && ![...marked].some((n) => n !== line && y(n) < t + h && y(n) + lh > t);
+  const tries = [y(line + 1) + 6, y(line) - h - 6, y(b + 1) + 6, y(a) - h - 6];
+  return tries.find(clear) ?? tries.find(fits) ?? tries[0];
 }
 function hideTip() { tip.hidden = true; }
 
@@ -230,8 +241,16 @@ function editAction(v, s, e, key, shift) {
   return null;
 }
 
+// Tab indents, so Escape first hands the next Tab back to the browser
+// and keyboard users can leave the editor (WCAG 2.1.2).
+let escaped = false;
+ed.addEventListener("blur", () => { escaped = false; });
 ed.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") { ev.preventDefault(); run(); return; }
+  if (ev.key === "Escape") { escaped = true; hideTip(); return; }
+  if (ev.key === "Shift") return;
+  if (ev.key === "Tab" && escaped) { escaped = false; return; }
+  escaped = false;
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
   const a = editAction(ed.value, ed.selectionStart, ed.selectionEnd, ev.key, ev.shiftKey);
   if (!a) return;
@@ -253,24 +272,62 @@ ed.addEventListener("keydown", (ev) => {
 });
 
 
+// What the editor shows: the visitor's own code ("mine", kept in
+// localStorage "play.mine"), code from a share link ("link"), or an
+// example. Picking an example never touches "mine"; edits to an
+// example last until the next pick.
+
 const EXAMPLES = [
   ["hello", "Hello, world"], ["sums", "Sum types and match"], ["none", "T | none and ??"],
   ["errors", "throws, try, catch"], ["iter", "Lists, closures, iterators"], ["structs", "Structs and traits"],
 ];
 for (const [file, label] of EXAMPLES) pick.append(new Option(label, file));
-pick.append(new Option("Your code", ""));
+pick.append(new Option("Your code", "mine"));
 
-async function loadExample(file) {
-  const r = await fetch(`examples/${file}.rok`);
-  ed.value = await r.text();
-  pick.dataset.text = ed.value;
-  diags = [];
-  paint();
-  save();
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const texts = new Map();
+async function exampleText(file) {
+  if (!texts.has(file)) texts.set(file, await (await fetch(`examples/${file}.rok`)).text());
+  return texts.get(file);
 }
-pick.addEventListener("change", () => { if (pick.value) loadExample(pick.value); });
 
-// The code in the link, and in this browser between visits.
+let view = "mine";
+let mine = "";
+let linked = null;
+
+// Untouched Hello world is still Hello world, not "Your code".
+function syncPick() {
+  pick.value = view === "mine" && ed.value === texts.get("hello") ? "hello" : view;
+}
+function show(text, v) {
+  view = v;
+  ed.value = text;
+  diags = [];
+  hideTip();
+  paint();
+  ed.setSelectionRange(0, 0);
+  ed.scrollTop = ed.scrollLeft = 0;
+  sync();
+  syncPick();
+  showPos();
+}
+function keep() {
+  if (view === "mine") { mine = ed.value; store.set("play.mine", mine); }
+  else if (view === "link") linked = ed.value;
+  syncPick();
+}
+pick.addEventListener("change", async () => {
+  const v = pick.value;
+  if (v === "mine") show(mine, "mine");
+  else if (v === "link") show(linked, "link");
+  else show(await exampleText(v), v);
+});
+
+// The code in the link.
+
 
 const b64 = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
@@ -297,12 +354,6 @@ async function unpack(code) {
   for (const p of parts) { buf.set(p, at); at += p.length; }
   return new TextDecoder().decode(buf);
 }
-function save() {
-  if (pick.value && ed.value !== pick.dataset.text) pick.value = "";
-  try { localStorage.setItem("play.code", ed.value); } catch {}
-}
-
-
 $("share").addEventListener("click", async () => {
   const q = opt.value !== "0" ? `&opt=${opt.value}` : "";
   const url = `${location.origin}${location.pathname}#code=${await pack(ed.value)}${q}`;
@@ -323,27 +374,74 @@ function say(text, kind) {
   status.textContent = text;
   status.dataset.kind = kind || "";
 }
-function print(text, cls) {
-  const span = document.createElement("span");
-  if (cls) span.className = cls;
-  span.textContent = text;
-  out.append(span);
-  out.scrollTop = out.scrollHeight;
-  $("copy-out").disabled = false;
+
+// Output is queued and written once a frame, as few nodes as there are
+// colour changes, and capped: a program printing 200,000 lines must not
+// cost a node and a layout per line.
+const MAX_LINES = 10_000;
+const MAX_CHARS = 1 << 20;
+const copyBtn = $("copy-out");
+let queue = [];
+let frame = 0;
+let shown = { lines: 0, chars: 0, cut: false };
+
+function put(text, cls) {
+  const last = queue[queue.length - 1];
+  if (last && last[1] === cls) last[0] += text;
+  else queue.push([text, cls]);
+  if (!frame) frame = requestAnimationFrame(flush);
+}
+// `always` is for the run's own notes, which still show after a cut.
+function print(text, cls = "", always = false) {
+  if (!text) return;
+  if (always) { put(text, cls); return; }
+  if (shown.cut) return;
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) {
+    if (++shown.lines === MAX_LINES) { text = text.slice(0, i + 1); shown.cut = true; break; }
+  }
+  shown.chars += text.length;
+  if (shown.chars > MAX_CHARS) {
+    text = text.slice(0, text.length - (shown.chars - MAX_CHARS)) + "\n";
+    shown.cut = true;
+  }
+  put(text, cls);
+  if (shown.cut) put(`\noutput truncated after ${shown.lines.toLocaleString("en")} lines\n`, "warn");
+}
+function flush() {
+  frame = 0;
+  const atEnd = out.scrollHeight - out.scrollTop - out.clientHeight < 32;
+  const frag = document.createDocumentFragment();
+  for (const [text, cls] of queue) {
+    if (!cls) { frag.append(text); continue; }
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = text;
+    frag.append(span);
+  }
+  queue = [];
+  out.append(frag);
+  if (atEnd) out.scrollTop = out.scrollHeight;
+  copyBtn.disabled = false;
+}
+function clearOut() {
+  cancelAnimationFrame(frame);
+  frame = 0;
+  queue = [];
+  shown = { lines: 0, chars: 0, cut: false };
+  out.replaceChildren();
 }
 // A cargo-style progress line: a right-aligned verb, then the rest.
 function step(verb, rest) {
   print(verb.padStart(12) + " ", "v");
   print(rest + "\n");
 }
-$("clear").addEventListener("click", () => { out.replaceChildren(); $("copy-out").disabled = true; say(""); });
+$("clear").addEventListener("click", () => { clearOut(); copyBtn.disabled = true; say(""); });
 
-$("copy-out").addEventListener("click", async () => {
-  const btn = $("copy-out");
-  try { await navigator.clipboard.writeText(out.innerText); btn.textContent = "Copied"; }
-  catch { btn.textContent = "Copy failed"; }
-  clearTimeout(btn.reset);
-  btn.reset = setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+copyBtn.addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(out.innerText); copyBtn.textContent = "Copied"; }
+  catch { copyBtn.textContent = "Copy failed"; }
+  clearTimeout(copyBtn.reset);
+  copyBtn.reset = setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
 });
 
 // rokc's diagnostics: each `error[..]: msg` / `warning: msg` block, its
@@ -396,101 +494,157 @@ function showErrors(text) {
 }
 
 
-let worker = null;
+// One run at a time: `gen` tells a stale await it was stopped or
+// replaced. While a run is in flight the Run button is Stop.
 const LIMIT = 10_000;
 const secs = (ms) => `${(ms / 1000).toFixed(2)} s`;
+const runHTML = () => `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1v8l7-4z" fill="currentColor"/></svg>Run <kbd class="kbd">${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘↵" : "Ctrl↵"}</kbd>`;
+const STOP_HTML = `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1" fill="currentColor"/></svg>Stop`;
+let gen = 0;
+let worker = null;
+let aborter = null;
+let timer = 0;
+
+function busy(on) {
+  if (on && !runBtn.dataset.running) runBtn.style.minWidth = `${runBtn.offsetWidth}px`;
+  if (!on) runBtn.style.minWidth = "";
+  runBtn.innerHTML = on ? STOP_HTML : runHTML();
+  if (on) { runBtn.dataset.running = "1"; runBtn.removeAttribute("aria-keyshortcuts"); }
+  else { delete runBtn.dataset.running; runBtn.setAttribute("aria-keyshortcuts", "Control+Enter Meta+Enter"); }
+}
+function finish() {
+  gen++;
+  if (worker) { worker.terminate(); worker = null; }
+  if (aborter) { aborter.abort(); aborter = null; }
+  clearTimeout(timer);
+  busy(false);
+}
+function stop() {
+  if (!runBtn.dataset.running) return;
+  const compiling = !worker;
+  finish();
+  print(`\nstopped${compiling ? " while compiling" : ""}\n`, "warn", true);
+  say("stopped", "bad");
+}
+
+// Stacked panes: bring the output up so the result (or the errors) is
+// in view without scrolling for it.
+function reveal() {
+  if (!matchMedia("(max-width: 860px)").matches) return;
+  const pane = out.closest(".out-pane");
+  const hdr = document.querySelector(".hdr");
+  const cover = getComputedStyle(hdr).position === "sticky" ? hdr.offsetHeight : 0;
+  const top = pane.getBoundingClientRect().top - cover;
+  if (top < innerHeight * 0.35) return;
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  scrollTo({ top: scrollY + top, behavior: still ? "auto" : "smooth" });
+}
 
 async function run() {
-  if (worker) { worker.terminate(); worker = null; }
-  out.replaceChildren();
+  finish();
+  const me = gen;
+  clearOut();
   diags = [];
   hideTip();
   paint();
-  runBtn.setAttribute("aria-busy", "true");
-  const done = () => runBtn.removeAttribute("aria-busy");
+  busy(true);
   say("compiling…");
   step("Compiling", `main.rok (wasm32, -O${opt.value})`);
+  reveal();
   const t0 = performance.now();
-  let res;
+  aborter = new AbortController();
+  let res, body;
   try {
-    res = await fetch(`api/compile?opt=${opt.value}`, { method: "POST", body: ed.value, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    res = await fetch(`api/compile?opt=${opt.value}`, { method: "POST", body: ed.value, headers: { "Content-Type": "text/plain; charset=utf-8" }, signal: aborter.signal });
+    body = res.ok && !res.headers.has("X-Rok-Diagnostics") ? await res.arrayBuffer() : await res.text();
   } catch {
-    done();
+    if (me !== gen) return;
+    finish();
     say("offline", "bad");
     print("cannot reach the compile server\n", "err");
     return;
   }
+  if (me !== gen) return;
+  aborter = null;
   const cached = res.headers.get("X-Rok-Cache") === "hit";
   const took = performance.now() - t0;
   if (!res.ok) {
-    done();
-    const text = await res.text();
-    if (res.status === 422) {
-      showErrors(text);
-      const n = diags.filter((d) => !d.warn).length;
-      say(n ? `${n} error${n > 1 ? "s" : ""}` : "failed", "bad");
-    } else {
-      say(`HTTP ${res.status}`, "bad");
-      print(text.replace(/\n*$/, "\n"), "err");
-    }
+    finish();
+    say(`HTTP ${res.status}`, "bad");
+    print(body.replace(/\n*$/, "\n"), "err");
     return;
   }
-  const wasm = await res.arrayBuffer();
+  if (typeof body === "string") {
+    finish();
+    showErrors(body);
+    const n = diags.filter((d) => !d.warn).length;
+    say(n ? `${n} error${n > 1 ? "s" : ""}` : "failed", "bad");
+    return;
+  }
   step("Finished", cached ? "cached build" : `in ${secs(took)}`);
   step("Running", "main.wasm");
   print("\n");
   say("running…");
   const t1 = performance.now();
   worker = new Worker("run.js", { type: "module" });
-  const stop = setTimeout(() => {
-    worker.terminate();
-    worker = null;
-    done();
-    print(`\nstopped after ${LIMIT / 1000} s\n`, "warn");
+  timer = setTimeout(() => {
+    finish();
+    print(`\nstopped after ${LIMIT / 1000} s\n`, "warn", true);
     say("stopped · 10 s limit", "bad");
   }, LIMIT);
   worker.onmessage = ({ data }) => {
     if (data.text !== undefined) { print(data.text, data.fd === 2 ? "err" : ""); return; }
-    clearTimeout(stop);
-    worker.terminate();
-    worker = null;
-    done();
+    finish();
     const ms = performance.now() - t1;
-    if (data.error) { print(`\n${data.error}\n`, "err"); say("crashed", "bad"); return; }
-    if (data.code !== 0) print(`\nexit code ${data.code}\n`, "warn");
+    if (data.error) { print(`\n${data.error}\n`, "err", true); say("crashed", "bad"); return; }
+    if (data.code !== 0) print(`\nexit code ${data.code}\n`, "warn", true);
     say(`exit ${data.code} · ${secs(ms)}`, data.code === 0 ? "" : "bad");
   };
-  worker.postMessage(wasm, [wasm]);
+  worker.postMessage({ wasm: body, lines: MAX_LINES, chars: MAX_CHARS }, [body]);
 }
-runBtn.addEventListener("click", run);
+runBtn.addEventListener("click", () => { if (runBtn.dataset.running) stop(); else run(); });
 document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter" && ev.target !== ed) { ev.preventDefault(); run(); }
 });
+busy(false);
 
-// The Run shortcut glyph: ⌘ on a Mac, Ctrl elsewhere.
-const runKey = document.querySelector("#run .kbd");
-if (runKey && !/Mac|iPhone|iPad/.test(navigator.platform)) runKey.textContent = "Ctrl↵";
+// On a phone the optimisation picker says only -O0 / -O2, so the
+// example picker keeps room for its name.
+const narrow = matchMedia("(max-width: 480px)");
+function optLabels() {
+  const [o0, o2] = opt.options;
+  o0.text = narrow.matches ? "-O0" : "-O0 · debug";
+  o2.text = narrow.matches ? "-O2" : "-O2 · release";
+}
+narrow.addEventListener("change", optLabels);
+optLabels();
 
-// Start: the link's code, else the last session's, else hello.
+// The skip link puts the caret in the editor, not just the scroll.
+document.querySelector(".skip").addEventListener("click", (ev) => { ev.preventDefault(); ed.focus(); });
+
+// Start: the visitor's code (or Hello world), then a link's code. A
+// link replaces "mine" only while mine is empty or untouched Hello world.
 
 (async () => {
   const om = location.hash.match(/[#&]opt=([02])/);
   if (om) opt.value = om[1];
+  mine = store.get("play.mine") ?? store.get("play.code") ?? "";
+  try { localStorage.removeItem("play.code"); } catch {}
+  if (mine) { store.set("play.mine", mine); show(mine, "mine"); }
+  const hello = await exampleText("hello");
   const m = location.hash.match(/^#code=([\w-]+)/);
-  let text = null;
-  if (m) { try { text = await unpack(m[1]); } catch { say("the link's code is damaged", "bad"); } }
-  if (text === null) { try { text = localStorage.getItem("play.code"); } catch {} }
-  if (text) {
-    ed.value = text;
-    pick.value = "";
-    paint();
-  } else {
-    pick.value = "hello";
-    await loadExample("hello");
+  if (m) {
+    let text = null;
+    try { text = await unpack(m[1]); } catch { say("the link's code is damaged", "bad"); }
+    if (text !== null && text !== mine) {
+      if (!mine || mine === hello) { mine = text; store.set("play.mine", mine); }
+      else { linked = text; pick.add(new Option("Code from the link", "link"), pick.options[EXAMPLES.length]); }
+    }
   }
-  ed.focus();
-  ed.setSelectionRange(0, 0);
-  showPos();
+  if (!mine) mine = hello;
+  if (linked !== null) show(linked, "link");
+  else if (ed.value !== mine) show(mine, "mine");
+  else syncPick();
 })();
 
 // A draggable divider resizes the editor vs the output (desktop only).
@@ -498,15 +652,19 @@ const divider = document.querySelector(".divider");
 const panes = document.querySelector(".ws");
 if (divider && panes) {
   const SPLIT_KEY = "play.split";
-  const apply = (pct) => panes.style.setProperty("--split", Math.max(25, Math.min(75, pct)) + "%");
-  try { const v = localStorage.getItem(SPLIT_KEY); if (v) apply(parseFloat(v)); } catch {}
+  const apply = (pct) => {
+    const v = Math.max(25, Math.min(75, pct));
+    panes.style.setProperty("--split", v + "%");
+    divider.setAttribute("aria-valuenow", String(Math.round(v)));
+  };
+  apply(parseFloat(store.get(SPLIT_KEY)) || 60);
   const pctAt = (clientX) => {
     const r = panes.getBoundingClientRect();
     return ((clientX - r.left) / r.width) * 100;
   };
   const save = () => {
     const cur = panes.style.getPropertyValue("--split");
-    try { if (cur) localStorage.setItem(SPLIT_KEY, parseFloat(cur)); } catch {}
+    if (cur) store.set(SPLIT_KEY, parseFloat(cur));
   };
   divider.addEventListener("pointerdown", (ev) => {
     if (matchMedia("(max-width: 860px)").matches) return;
@@ -526,31 +684,49 @@ if (divider && panes) {
   });
   divider.addEventListener("keydown", (ev) => {
     const cur = parseFloat(panes.style.getPropertyValue("--split")) || 60;
-    if (ev.key === "ArrowLeft") { ev.preventDefault(); apply(cur - 3); save(); }
-    else if (ev.key === "ArrowRight") { ev.preventDefault(); apply(cur + 3); save(); }
+    const to = { ArrowLeft: cur - 3, ArrowRight: cur + 3, Home: 25, End: 75 }[ev.key];
+    if (to === undefined) return;
+    ev.preventDefault();
+    apply(to);
+    save();
   });
 }
 
-// Theme: localStorage "theme" is "light" or "dark"; absent, follow the system.
+// Theme, shared with rok-lang.org and its docs: a `theme` cookie for
+// .rok-lang.org, else localStorage "theme", else the system. "auto"
+// (System) deletes both.
 const root = document.documentElement;
 const dark = matchMedia("(prefers-color-scheme: dark)");
-const getTheme = () => { try { return localStorage.getItem("theme") || "auto"; } catch { return "auto"; } };
-const isDark = () => root.classList.contains("dk");
+const themeBtn = document.querySelector(".theme");
+const COOKIE = "; Path=/; SameSite=Lax; Secure" + (/(^|\.)rok-lang\.org$/.test(location.hostname) ? "; Domain=.rok-lang.org" : "");
+function getTheme() {
+  const c = document.cookie.match(/(?:^|;\s*)theme=(light|dark)(?:;|$)/);
+  if (c) return c[1];
+  const t = store.get("theme");
+  return t === "light" || t === "dark" ? t : "auto";
+}
 function applyTheme() {
   const t = getTheme();
-  const d = t === "dark" || (t !== "light" && dark.matches);
+  const d = t === "dark" || (t === "auto" && dark.matches);
   root.classList.toggle("dk", d);
   root.classList.toggle("lt", !d);
   for (const b of document.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", String(b.dataset.theme === t));
-  const tb = document.querySelector(".theme");
-  tb.setAttribute("aria-label", d ? "Switch to light theme" : "Switch to dark theme");
-  tb.title = tb.getAttribute("aria-label");
+  themeBtn.setAttribute("aria-pressed", String(d));
+  themeBtn.title = d ? "Switch to light theme" : "Switch to dark theme";
 }
 function setTheme(t) {
-  try { t === "auto" ? localStorage.removeItem("theme") : localStorage.setItem("theme", t); } catch {}
+  if (t === "auto") {
+    try { localStorage.removeItem("theme"); } catch {}
+    document.cookie = "theme=" + COOKIE + "; Max-Age=0";
+  } else {
+    store.set("theme", t);
+    document.cookie = `theme=${t}${COOKIE}; Max-Age=31536000`;
+  }
   applyTheme();
 }
-document.querySelector(".theme").addEventListener("click", () => setTheme(isDark() ? "light" : "dark"));
+themeBtn.addEventListener("click", () => setTheme(root.classList.contains("dk") ? "light" : "dark"));
 for (const b of document.querySelectorAll(".seg button")) b.addEventListener("click", () => setTheme(b.dataset.theme));
 dark.addEventListener("change", applyTheme);
+// Another rok-lang.org tab may have changed it meanwhile.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) applyTheme(); });
 applyTheme();
