@@ -16,10 +16,10 @@ jobs:
         with:
           submodules: recursive
 
-      # The rok toolchain. Pin a version for repeatable builds.
+      # The latest rok release, the one the deploy builds and serves with.
       - name: Install rok
         run: |
-          curl -fsSL https://rok-lang.org/install.sh | sh -s -- --version 0.1.4
+          curl -fsSL https://rok-lang.org/install.sh | ROK_NO_MODIFY_PATH=1 sh -s -- -q
           echo "$HOME/.rok/bin" >> "$GITHUB_PATH"
 
       - name: Build
