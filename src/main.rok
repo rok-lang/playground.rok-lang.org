@@ -45,6 +45,7 @@
 
 use rok::std::env;
 use rok::std::fs;
+use rok::std::process;
 use rok::std::net;
 use rok::std::net::TcpStream;
 use rok::std::process::{Command, Stdio};
@@ -611,7 +612,7 @@ fn not_found(cfg: Cfg, p: str) -> Resp {
 
 fn handle(s: TcpStream, cfg: Cfg) {
     let t0 = Instant::now();
-    let r = try http::read_request(s, MAX_SOURCE, Duration::sec(10)) catch e {
+    let r = try http::read_request(s, MAX_SOURCE, Duration::secs(10)) catch e {
         try http::send(s, e.status, ["Content-Type: text/plain; charset=utf-8"], e.msg + "\n", false) catch _ {};
         s.close();
         return;
@@ -629,7 +630,7 @@ fn main() throws {
     // compile time: only this machine may ask then.
     if cfg.wrap.is_empty() && !cfg.addr.starts_with("127.0.0.1:") && !cfg.addr.starts_with("[::1]:") && !cfg.addr.starts_with("localhost:") {
         eprintln(f"error: PLAY_ADDR={cfg.addr} is reachable from other machines, so PLAY_WRAP must name a sandbox (scripts/sandbox.sh, see README.md)");
-        env::exit(2);
+        process::exit(2);
     }
     try fs::create_dir_all(cfg.work + "/jobs");
     // Without a writable share directory, Share falls back to #code links.
