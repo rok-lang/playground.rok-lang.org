@@ -99,6 +99,9 @@ struct Cfg {
     /// The og:image version: the first 10 hex digits of og.png's SHA-256,
     /// put in place of index.html's `og.png?v=dev` when it is served.
     og: str;
+    /// The toolchain's release (`rokc --version`), put in place of
+    /// index.html's `rok dev`.
+    release: str;
 }
 
 fn setting(k: str, dflt: str) -> str {
@@ -110,6 +113,13 @@ fn words(s: str) -> List<str> {
     let out: List<str> = List::new();
     for w in s.split_whitespace() { out.push(w); }
     out
+}
+
+/// `0.1.6` from `rokc 0.1.6 (d0c8492ae 2026-11-01)`, or `dev`.
+fn rokc_release(rokc: str) -> str {
+    let o = try Command::new(rokc).args(["--version"]).stdin(Stdio::Null).output() catch _ { return "dev"; };
+    let w = words((try? str::from_utf8(o.stdout)) ?? "");
+    if o.status.success() && w.len() > 1 { w[1] } else { "dev" }
 }
 
 /// The rok.mjs of the toolchain at `rokc` (a path): its wasm32 runtime's.
@@ -127,7 +137,7 @@ fn load_cfg() throws -> Cfg {
     let rate = try setting("PLAY_RATE", "30").parse::<i64>();
     let share_rate = try setting("PLAY_SHARE_RATE", "10").parse::<i64>();
     let share_max = try setting("PLAY_SHARE_MAX", "100000").parse::<i64>();
-    Cfg { addr: setting("PLAY_ADDR", "127.0.0.1:8405"), rokc: rokc, site: setting("PLAY_SITE", "../rok-lang.org/static"), mjs: mjs, wrap: try env::var("PLAY_WRAP") catch _ { "" }, work: work, jobs: jobs, timeout: timeout, rate: rate, client_header: setting("PLAY_CLIENT_HEADER", "").to_lowercase(), shares: setting("PLAY_SHARES", work + "/shares"), share_rate: share_rate, share_max: share_max, og: og_version(["static", setting("PLAY_SITE", "../rok-lang.org/static")]) }
+    Cfg { addr: setting("PLAY_ADDR", "127.0.0.1:8405"), rokc: rokc, site: setting("PLAY_SITE", "../rok-lang.org/static"), mjs: mjs, wrap: try env::var("PLAY_WRAP") catch _ { "" }, work: work, jobs: jobs, timeout: timeout, rate: rate, client_header: setting("PLAY_CLIENT_HEADER", "").to_lowercase(), shares: setting("PLAY_SHARES", work + "/shares"), share_rate: share_rate, share_max: share_max, og: og_version(["static", setting("PLAY_SITE", "../rok-lang.org/static")]), release: rokc_release(rokc) }
 }
 
 /// The version of the og.png that `/og.png` serves from `roots`, or
@@ -497,7 +507,7 @@ fn page_resp(cfg: Cfg, path: str) -> Resp | none {
     let r = file_resp(path) ?? { return none; };
     if !path.ends_with(".html") { return r; }
     let html = try str::from_utf8(r.body[0:r.body.len()]) catch _ { return r; };
-    r.body = bytes_of(stamp(cfg, fill(html.replace("og.png?v=dev", "og.png?v=" + cfg.og))));
+    r.body = bytes_of(stamp(cfg, fill(html.replace("og.png?v=dev", "og.png?v=" + cfg.og).replace("rok dev →", f"rok {cfg.release} →"))));
     r
 }
 
@@ -667,7 +677,7 @@ fn compile_errors_are_answers() {
     try fs::create_dir_all(work + "/jobs") catch e { panic(f"{e}"); };
     // A stand-in rokc, run by the wrap command so it needs no exec bit.
     try fs::write(work + "/rokc.sh", "echo 'error: boom' >&2\nexit 1\n") catch e { panic(f"{e}"); };
-    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/rokc.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: work + "/shares", share_rate: 10, share_max: 2, og: "0123456789" };
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/rokc.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: work + "/shares", share_rate: 10, share_max: 2, og: "0123456789", release: "9.9.9" };
     let r = compile(cfg, "fn main() {}\n", "0");
     try fs::remove_dir_all(work) catch _ {};
     expect(r.status == 200, "status");
@@ -681,6 +691,7 @@ fn compile_errors_are_answers() {
 
     let page = page_resp(cfg, "static/index.html") ?? panic("no index.html");
     expect(body_of(page).contains("og.png?v=0123456789") && !body_of(page).contains("v=dev"), "og version in page");
+    expect(body_of(page).contains("rok 9.9.9 → wasm32") && !body_of(page).contains("rok dev"), "toolchain release in page");
     expect(!body_of(page).contains("<!--web:"), "shared markup filled in");
     expect(body_of(page).contains("data-theme-set=\"dark\"") && body_of(page).contains("<a href=\"/\" aria-current=\"page\">Playground</a>"), "footer");
     let css = kit_resp("/rok.css") ?? panic("no /rok.css");
@@ -699,7 +710,7 @@ fn compile_errors_are_answers() {
 /// current ?v= is cached for good, a page for minutes, the rest revalidated.
 #[test]
 fn caching() {
-    let cfg = Cfg { addr: "127.0.0.1:0", rokc: "", site: "", mjs: "", wrap: "", work: "", jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: "", share_rate: 10, share_max: 2, og: "dev" };
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: "", site: "", mjs: "", wrap: "", work: "", jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: "", share_rate: 10, share_max: 2, og: "dev", release: "dev" };
     // GET `target`, holding If-None-Match `inm` when not empty.
     let get = |target: str, inm: str| {
         let h = if inm.is_empty() { "" } else { "\r\nIf-None-Match: " + inm };
@@ -734,7 +745,7 @@ fn caching() {
 #[test]
 fn share_links() {
     let work = f"{env::temp_dir()}/rok-playground-share-{rok::std::process::id()}";
-    let cfg = Cfg { addr: "127.0.0.1:0", rokc: "", site: "", mjs: "", wrap: "", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: work + "/shares", share_rate: 10, share_max: 2, og: "dev" };
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: "", site: "", mjs: "", wrap: "", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: work + "/shares", share_rate: 10, share_max: 2, og: "dev", release: "dev" };
     SHARES.store(0i64);
     let a = share(cfg, "fn main() {}\n");
     let id = body_of(a);
@@ -760,7 +771,7 @@ fn format_answers() {
     try fs::create_dir_all(work + "/jobs") catch e { panic(f"{e}"); };
     try fs::write(work + "/ok.sh", "printf 'fn main() {\\n    f();\\n}\\n' > main.rok\n") catch e { panic(f"{e}"); };
     try fs::write(work + "/bad.sh", "echo 'error[E001]: <fmt>:2:1: unterminated string literal' >&2\nexit 1\n") catch e { panic(f"{e}"); };
-    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/ok.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: work + "/shares", share_rate: 10, share_max: 2, og: "dev" };
+    let cfg = Cfg { addr: "127.0.0.1:0", rokc: work + "/ok.sh", site: "", mjs: "", wrap: "/bin/sh", work: work, jobs: 1, timeout: 20u64, rate: 30, client_header: "", shares: work + "/shares", share_rate: 10, share_max: 2, og: "dev", release: "dev" };
     let ok = format(cfg, "fn main() {\nf();\n}\n");
     cfg.rokc = work + "/bad.sh";
     let bad = format(cfg, "fn main() {\n\"\n");
