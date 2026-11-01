@@ -99,6 +99,15 @@ select.tb.mono { font-size: 12px; }
   box-shadow: 0 12px 32px -8px rgb(0 0 0 / .3);
   color: var(--ink-3);
 }
+/* It drops in on open and fades out on close (the close only where
+   ::details-content is known; elsewhere it just goes). */
+.more:not([open]) .menu { opacity: 0; translate: 0 -4px; pointer-events: none; }
+@keyframes drop { from { opacity: 0; translate: 0 -4px; } }
+@media (prefers-reduced-motion: no-preference) {
+  .more[open] .menu { animation: drop var(--dur) var(--ease); }
+  .more .menu { transition: opacity var(--dur-out) var(--ease), translate var(--dur-out) var(--ease); }
+  .more::details-content { transition: content-visibility var(--dur-out) allow-discrete; }
+}
 .more .menu p { margin: 0; }
 .more .menu p a { color: var(--ink-2); }
 .more .menu .mono { font-size: 12px; }
@@ -106,9 +115,10 @@ select.tb.mono { font-size: 12px; }
 .more .menu .seg { margin: 0; }
 .more .menu .social { margin-left: -6px; }
 
-/* The share link, to copy by hand when the clipboard says no. */
-.sharebar { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg-2); color: var(--ink-2); }
-.sharebar[hidden] { display: none; }
+/* The share link, to copy by hand when the clipboard says no; it
+   slides open in a .reveal (rok.css). */
+#sharebar { flex: none; }
+.sharebar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg-2); color: var(--ink-2); }
 .sharebar label { white-space: nowrap; }
 .sharebar .lk { margin-left: auto; }
 .sharebar input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 12px; }
@@ -212,7 +222,11 @@ select.tb.mono { font-size: 12px; }
   overflow-wrap: anywhere;
   pointer-events: none;
 }
-.tip[hidden] { display: none; }
+.tip[hidden] { display: none; opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .tip { transition: opacity var(--dur-out) var(--ease), display var(--dur-out) allow-discrete; }
+  @starting-style { .tip { opacity: 0; } }
+}
 .tip .h b { color: var(--err); font-weight: 600; }
 .tip .h.w b { color: var(--warn); }
 .tip .n { color: var(--ink-2); }
@@ -320,5 +334,5 @@ select.tb.mono { font-size: 12px; }
 }
 /* Print: the code and its output; no toolbar, share bar or tips. */
 @media print {
-  .hdr, .sharebar, .tip { display: none !important; }
+  .hdr, #sharebar, .tip { display: none !important; }
 }

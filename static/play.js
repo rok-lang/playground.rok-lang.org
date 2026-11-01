@@ -17,6 +17,33 @@ const tip = $("tip");
 const pos = $("pos");
 const diagBtn = $("diag");
 
+// Motion (rok.css): what changes size after the visitor's first touch
+// eases from the old size to the new; before it (load-time state) and
+// with reduced motion it snaps. #diag and #reset fade only once live.
+const still = matchMedia("(prefers-reduced-motion: reduce)");
+let live = false;
+function wake() {
+  if (live) return;
+  live = true;
+  diagBtn.classList.add("appear");
+  $("reset").classList.add("appear");
+}
+addEventListener("pointerdown", wake, { capture: true, once: true });
+addEventListener("keydown", wake, { capture: true, once: true });
+// rokResize of the kit's copy.js: run change, then ease el's width and
+// height to the result. One line, cut not wrapped, while it catches up.
+function resize(el, change) {
+  const w0 = el.offsetWidth, h0 = el.offsetHeight;
+  if (el.rz) el.rz.cancel();
+  change();
+  const w1 = el.offsetWidth, h1 = el.offsetHeight;
+  if (!live || still.matches || !el.animate || !w0 || !w1 || (w0 === w1 && h0 === h1)) return;
+  const from = { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "clip" }, to = { ...from };
+  if (w0 !== w1) { from.width = `${w0}px`; to.width = `${w1}px`; }
+  if (h0 !== h1) { from.height = `${h0}px`; to.height = `${h1}px`; }
+  el.rz = el.animate([from, to], { duration: 200, easing: "cubic-bezier(.2,0,0,1)" });
+}
+
 // Highlighting, with the classes of rok-syntax: k t s n c a.
 
 const KEYWORDS = new Set(("fn let mut if else match for in while loop return break continue struct enum trait impl " +
@@ -106,8 +133,10 @@ function showDiagCount() {
   const parts = [];
   if (errs) parts.push(`${errs} error${errs > 1 ? "s" : ""}`);
   if (warns) parts.push(`${warns} warning${warns > 1 ? "s" : ""}`);
-  diagBtn.hidden = !parts.length;
-  diagBtn.textContent = parts.join(", ");
+  const text = parts.join(", ");
+  // keeps its last count while it fades out
+  diagBtn.hidden = !text;
+  if (text && text !== diagBtn.textContent) resize(diagBtn, () => { diagBtn.textContent = text; });
   diagBtn.classList.toggle("w", !errs && warns > 0);
   diagBtn.title = diags.some((d) => d.line) ? "Go to the first one" : "";
 }
@@ -451,10 +480,16 @@ async function copyText(text) {
 const shareBtn = $("share");
 const shareBar = $("sharebar");
 const shareUrl = $("share-url");
+// The bar slides open (rok.css .reveal); shut, it is inert.
+function shareBarOpen(on) {
+  shareBar.classList.toggle("open", on);
+  shareBar.firstElementChild.inert = !on;
+}
+function label(btn, text) { resize(btn, () => { btn.textContent = text; }); }
 function flash(text) {
-  shareBtn.textContent = text;
+  label(shareBtn, text);
   clearTimeout(shareBtn.reset);
-  shareBtn.reset = setTimeout(() => { shareBtn.textContent = "Share"; }, 2000);
+  shareBtn.reset = setTimeout(() => label(shareBtn, "Share"), 2000);
 }
 // A short /p/<id> link the server stores; without one (offline, rate
 // limited, no store), the code in the link itself.
@@ -472,18 +507,18 @@ shareBtn.addEventListener("click", async () => {
   let url;
   try { url = await link; } catch { flash("Share failed"); return; }
   history.replaceState(null, "", url);
-  if (copied) { shareBar.hidden = true; flash("Link copied"); return; }
+  if (copied) { shareBarOpen(false); flash("Link copied"); return; }
   shareUrl.value = url;
-  shareBar.hidden = false;
-  shareUrl.focus();
+  shareBarOpen(true);
+  shareUrl.focus({ preventScroll: true });
   shareUrl.select();
 });
-$("share-close").addEventListener("click", () => { shareBar.hidden = true; shareBtn.focus(); });
+$("share-close").addEventListener("click", () => { shareBarOpen(false); shareBtn.focus(); });
 shareUrl.addEventListener("keydown", (ev) => { if (ev.key === "Escape") $("share-close").click(); });
 
 
 function say(text, kind) {
-  status.textContent = text;
+  if (text !== status.textContent) resize(status, () => { status.textContent = text; });
   status.dataset.kind = kind || "";
 }
 
@@ -567,10 +602,10 @@ out.addEventListener("click", (ev) => {
 $("clear").addEventListener("click", () => { clearOut(); copyBtn.disabled = true; say(""); });
 
 copyBtn.addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(out.innerText); copyBtn.textContent = "Copied"; }
-  catch { copyBtn.textContent = "Copy failed"; }
+  try { await navigator.clipboard.writeText(out.innerText); label(copyBtn, "Copied"); }
+  catch { label(copyBtn, "Copy failed"); }
   clearTimeout(copyBtn.reset);
-  copyBtn.reset = setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
+  copyBtn.reset = setTimeout(() => label(copyBtn, "Copy"), 2000);
 });
 
 // rokc's diagnostics: each `error[..]: msg` / `warning: msg` block, its
