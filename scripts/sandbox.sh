@@ -25,7 +25,7 @@ job=$(pwd)
 exec prlimit --as=17179869184 --cpu=60 --fsize=67108864 --core=0 -- \
   bwrap --unshare-all --die-with-parent --new-session --clearenv \
     --setenv PATH /usr/bin:/bin --setenv HOME "$job" --setenv TMPDIR "$job" \
-    --setenv NO_COLOR 1 --setenv ROKC_INCREMENTAL 0 \
+    --setenv NO_COLOR 1 --setenv ROK_INCREMENTAL 0 \
     --ro-bind /usr /usr \
     --ro-bind-try /lib /lib --ro-bind-try /lib64 /lib64 \
     --proc /proc --tmpfs /dev --dev-bind /dev/null /dev/null --tmpfs /tmp \

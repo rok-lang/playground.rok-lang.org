@@ -10,6 +10,6 @@
 FROM debian:bookworm-slim
 ARG TOOLCHAIN
 COPY ${TOOLCHAIN}/ /opt/rok/
-ENV PATH=/opt/rok/bin:$PATH NO_COLOR=1 ROKC_INCREMENTAL=0
+ENV PATH=/opt/rok/bin:$PATH NO_COLOR=1 ROK_INCREMENTAL=0
 WORKDIR /job
 ENTRYPOINT ["rokc"]
