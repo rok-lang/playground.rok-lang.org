@@ -50,10 +50,8 @@ use rok::std::net;
 use rok::std::net::TcpStream;
 use rok::std::process::{Command, Stdio};
 use rok::std::thread;
-use rok::std::time::Duration;
 use rok::core::crypto::HashAlgorithm;
 use rok::std::time::SystemTime;
-use rok::core::task::time::Instant;
 use web::chrome;
 use web::http;
 use web::http::Request;
@@ -196,7 +194,7 @@ struct Window {
 
 static CLIENTS: Mutex<Dict<str, Window>> = Mutex::new(Dict::new());
 
-fn now_secs() -> i64 { try SystemTime::now().unix_seconds() catch _ { 0i64 } }
+fn now_secs() -> i64 { SystemTime::now().unix_secs() }
 
 fn allow(client: str, rate: i64) -> bool {
     using g = CLIENTS.lock() {
@@ -206,7 +204,7 @@ fn allow(client: str, rate: i64) -> bool {
         // without resetting everyone (which an attacker could force).
         if d.len() > 2048 {
             let keep: Dict<str, Window> = Dict::new();
-            for (k, w) in d.entries() {
+            for (k, w) in d.iter() {
                 if t - w.start < 60i64 { keep.insert(k, w); }
             }
             d = keep;
@@ -242,12 +240,12 @@ fn client_of(s: TcpStream, r: Request, header: str) -> str {
 // ---- compiling ----
 
 /// What the playground does not compile: reading files at compile time
-/// (`include_str!`, `include_bytes!`, `#[path]`, WIT imports) and raw
-/// MLIR. The sandbox is what keeps the server's files out of reach; this
-/// only says so plainly.
+/// (`include_str!`, `include_bytes!`, `#[path]`, WIT imports). The
+/// sandbox is what keeps the server's files out of reach; this only says
+/// so plainly.
 fn refused(src: str) -> str | none {
     for (word, what) in [("include_str", "include_str!"), ("include_bytes", "include_bytes!"), ("#[path", "#[path(..)]"),
-        ("wit::import", "WIT imports"), ("wit::export", "WIT exports"), ("__mlir_op", "__mlir_op"), ("__mlir_attr", "__mlir_attr")] {
+        ("wit::import", "WIT imports"), ("wit::export", "WIT exports")] {
             if src.contains(word) {
                 return f"error: the playground does not compile {what}: a program here is one file and reads nothing at compile time\n";
             }
@@ -297,6 +295,7 @@ fn run_rokc(cfg: Cfg, src: str, opt: str, key: str) -> Resp {
 /// run or took longer than `secs`.
 fn run_tool(cfg: Cfg, dir: str, args: List<str>, secs: u64, what: str) -> bool | Resp {
     let log = try fs::create(dir + "/rokc.log") catch e { return text(500, f"work directory: {e}"); };
+    let log2 = try log.try_clone() catch e { return text(500, f"work directory: {e}"); };
     let argv: List<str> = List::new();
     for w in words(cfg.wrap) { argv.push(w); }
     argv.push(cfg.rokc);
@@ -306,7 +305,7 @@ fn run_tool(cfg: Cfg, dir: str, args: List<str>, secs: u64, what: str) -> bool |
     let cmd = Command::new(argv[0]).args(argv[1:argv.len()].to_list()).current_dir(dir).env_clear()
         .env("PATH", "/usr/bin:/bin").env("HOME", dir).env("TMPDIR", dir).env("ROK_HOME", dir + "/.rok")
         .env("XDG_CACHE_HOME", dir + "/.cache").env("NO_COLOR", "1").env("ROK_INCREMENTAL", "0")
-        .stdin(Stdio::Null).stdout(Stdio::File(log)).stderr(Stdio::File(log)).kill_on_drop(true);
+        .stdin(Stdio::Null).stdout(Stdio::File(log)).stderr(Stdio::File(log2)).kill_on_drop(true);
     let child = try cmd.spawn() catch e { return text(500, f"cannot start rokc: {e}"); };
     let t0 = Instant::now();
     let limit = (secs as i64) * 1000i64;
@@ -340,7 +339,7 @@ fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
     let wasm = try fs::read(dir + "/main.wasm") catch e { return text(500, f"rokc output: {e}"); };
     try fs::create_dir_all(cfg.work + "/cache") catch _ {};
     let n = 0usize;
-    for _ in try fs::read_dir(cfg.work + "/cache") catch _ { return text(500, "cache directory"); } { n += 1; }
+    for _ in (try fs::read_dir(cfg.work + "/cache") catch _ { return text(500, "cache directory"); }).results() { n += 1; }
     if n >= MAX_CACHED { try fs::remove_dir_all(cfg.work + "/cache") catch _ {}; try fs::create_dir_all(cfg.work + "/cache") catch _ {}; }
     try fs::rename(dir + "/main.wasm", cfg.work + "/cache/" + key + ".wasm") catch _ {};
     Resp { status: 200, headers: ["Content-Type: application/wasm", "Cache-Control: no-store", "X-Rok-Cache: miss"], body: wasm }
@@ -441,7 +440,7 @@ fn shared(cfg: Cfg, id: str) -> str | none {
 
 fn count_shares(dir: str) -> i64 {
     let n = 0i64;
-    for e in try fs::read_dir(dir) catch _ { return 0i64; } {
+    for e in (try fs::read_dir(dir) catch _ { return 0i64; }).results() {
         let ent = try e.get() catch _ { continue; };
         if ent.file_name().ends_with(".rok") { n += 1i64; }
     }
@@ -614,13 +613,13 @@ fn handle(s: TcpStream, cfg: Cfg) {
     let t0 = Instant::now();
     let r = try http::read_request(s, MAX_SOURCE, Duration::secs(10)) catch e {
         try http::send(s, e.status, ["Content-Type: text/plain; charset=utf-8"], e.msg + "\n", false) catch _ {};
-        s.close();
+        try s.close() catch _ {};
         return;
     };
     let resp = route(cfg, s, r);
     // http::send writes a 304 without a body or Content-Length.
     try http::send(s, resp.status, resp.headers, resp.body, r.method == "HEAD") catch _ {};
-    s.close();
+    try s.close() catch _ {};
     eprintln(f"{r.method} {r.path} {resp.status} {resp.body.len()}B {t0.elapsed().as_ms()}ms");
 }
 
@@ -641,7 +640,7 @@ fn main() throws {
     }
     using l = try net::tcp_listen(cfg.addr) {
         eprintln(f"playground on http://{cfg.addr}, compiling with {cfg.rokc} ({cfg.jobs} at a time, {cfg.timeout} s each)");
-        for c in l.incoming() {
+        for c in l.incoming().results() {
             let s = try c.get() catch e {
                 eprintln(f"accept: {e}");
                 continue;
@@ -649,7 +648,7 @@ fn main() throws {
             if ACTIVE.fetch_add(1i64) >= MAX_CONNS {
                 ACTIVE.fetch_sub(1i64);
                 try http::send(s, 503, ["Content-Type: text/plain; charset=utf-8"], "busy\n", false) catch _ {};
-                s.close();
+                try s.close() catch _ {};
                 continue;
             }
             let t = thread::spawn(|| {

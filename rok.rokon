@@ -1,6 +1,7 @@
 Package {
     name: "rok_playground",
     version: "0.1.0",
+    toolchain: "0.2",
     deps: {
         "web": Dep::path("web/rok"),
     },
