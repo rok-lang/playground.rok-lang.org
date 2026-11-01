@@ -468,11 +468,11 @@ fn shared_page(cfg: Cfg, src: str) -> Resp | none {
 /// attributes are allowed only because WebKit's own <select> shadow DOM
 /// uses them; an attribute cannot hold a selector, and anything it loads
 /// still meets img-src/font-src. <style> and stylesheets stay strict.
-const CSP: str = "Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; worker-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+const CSP: str = "Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; worker-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" + http::REPORT_TO;
 
 fn file_resp(path: str) -> Resp | none {
     let data = try fs::read(path) catch _ { return none; };
-    Resp { status: 200, headers: [f"Content-Type: {http::content_type(path)}", "Cache-Control: no-cache", CSP], body: data }
+    Resp { status: 200, headers: [f"Content-Type: {http::content_type(path)}", "Cache-Control: no-cache", CSP, http::REPORTING], body: data }
 }
 
 /// A file of the web kit, by its public path. `/theme-init.js` is the
@@ -482,7 +482,7 @@ fn kit_resp(path: str) -> Resp | none {
     let f = kit::find(kit::Mark::Rok, name) ?? { return none; };
     let b: List<u8> = List::new();
     for x in f.data { b.push(x); }
-    Resp { status: 200, headers: [f"Content-Type: {http::content_type(name)}", "Cache-Control: no-cache", CSP], body: b }
+    Resp { status: 200, headers: [f"Content-Type: {http::content_type(name)}", "Cache-Control: no-cache", CSP, http::REPORTING], body: b }
 }
 
 /// A webfont of the kit (`/fonts/...`), from its files beside the server
@@ -558,6 +558,11 @@ fn cached(x: Resp, page: bool, r: Request) -> Resp {
 
 fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
     let p = r.path;
+    if p == http::REPORT_PATH {
+        if r.method != "POST" { return text(405, "POST only."); }
+        if let line: str = http::csp_report(r.body) { eprintln(line); }
+        return Resp { status: 204, headers: ["Cache-Control: no-store"], body: List::new() };
+    }
     if p == "/api/compile" {
         if r.method != "POST" { return text(405, "POST the source to /api/compile."); }
         if !allow(client_of(s, r, cfg.client_header), cfg.rate) { return text(429, f"More than {cfg.rate} compiles a minute; wait a little."); }
