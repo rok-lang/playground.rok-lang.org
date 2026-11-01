@@ -305,7 +305,7 @@ fn run_tool(cfg: Cfg, dir: str, args: List<str>, secs: u64, what: str) -> bool |
     // its home and caches are the job's own directory.
     let cmd = Command::new(argv[0]).args(argv[1:argv.len()].to_list()).current_dir(dir).env_clear()
         .env("PATH", "/usr/bin:/bin").env("HOME", dir).env("TMPDIR", dir).env("ROK_HOME", dir + "/.rok")
-        .env("XDG_CACHE_HOME", dir + "/.cache").env("NO_COLOR", "1").env("ROKC_INCREMENTAL", "0")
+        .env("XDG_CACHE_HOME", dir + "/.cache").env("NO_COLOR", "1").env("ROK_INCREMENTAL", "0")
         .stdin(Stdio::Null).stdout(Stdio::File(log)).stderr(Stdio::File(log)).kill_on_drop(true);
     let child = try cmd.spawn() catch e { return text(500, f"cannot start rokc: {e}"); };
     let t0 = Instant::now();

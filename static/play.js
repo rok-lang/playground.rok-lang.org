@@ -616,7 +616,11 @@ function parseDiags(text) {
   let d = null;
   for (const line of text.split("\n")) {
     let m;
-    if ((m = line.match(/^(error|warning)(\[\w+\])?: (.*)$/))) {
+    // rokc's closing tally (`could not build main (1 error, ..)`) is no
+    // diagnostic of its own
+    if (/^error: could not (build|compile) /.test(line)) {
+      d = null;
+    } else if ((m = line.match(/^(error|warning)(\[\w+\])?: (.*)$/))) {
       d = { kind: m[1] + (m[2] || ""), warn: m[1] === "warning", head: m[3], notes: [], line: 0, col: 0, len: 1 };
       found.push(d);
     } else if (!d) {
