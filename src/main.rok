@@ -155,8 +155,6 @@ fn bytes_of(s: str) -> List<u8> {
     b
 }
 
-// ---- answers ----
-
 struct Resp {
     status: i32;
     headers: List<str>;
@@ -185,8 +183,7 @@ fn hex(bytes: List<u8>) -> str {
     out.to_str()
 }
 
-// ---- rate limit: per client, a window of one minute ----
-
+/// A client's requests in its current one-minute window.
 struct Window {
     start: i64;
     count: i64;
@@ -236,8 +233,6 @@ fn client_of(s: TcpStream, r: Request, header: str) -> str {
     let t = f"{a}";
     if let k: usize = t.rfind(":") { t[:k] } else { t }
 }
-
-// ---- compiling ----
 
 /// What the playground does not compile: reading files at compile time
 /// (`include_str!`, `include_bytes!`, `#[path]`, WIT imports). The
@@ -384,10 +379,9 @@ fn format_in(cfg: Cfg, src: str, dir: str) -> Resp {
     text(200, out)
 }
 
-// ---- share links: the source in a file named by its hash ----
-
-/// The id of `src`: the first 50 bits of its SHA-256 in base32, so the
-/// same code is always the same link.
+/// The id of `src`, and the name of the file a share link stores it in:
+/// the first 50 bits of its SHA-256 in base32, so the same code is
+/// always the same link.
 fn share_id(src: str) -> str {
     let d = HashAlgorithm::Sha256.digest(src.as_bytes());
     let v = 0u64;
@@ -462,8 +456,6 @@ fn shared_page(cfg: Cfg, src: str) -> Resp | none {
         .replace("<main ", f"<pre id=\"shared\" hidden>\n{chrome::esc(src)}</pre>\n<main "));
     r
 }
-
-// ---- routes ----
 
 /// The page's own headers: scripts and workers from here only (and the
 /// Cloudflare Web Analytics beacon the proxy injects), wasm compiled from
