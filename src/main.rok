@@ -295,7 +295,12 @@ fn run_rokc(cfg: Cfg, src: str, opt: str, key: str) -> Resp {
 /// run or took longer than `secs`.
 fn run_tool(cfg: Cfg, dir: str, args: List<str>, secs: u64, what: str) -> bool | Resp {
     let log = try fs::create(dir + "/rokc.log") catch e { return text(500, f"work directory: {e}"); };
-    let log2 = try log.try_clone() catch e { return text(500, f"work directory: {e}"); };
+    let log2 = try log.try_clone() catch e {
+        try log.close() catch _ {};
+        return text(500, f"work directory: {e}");
+    };
+    let out = unsafe { rok::core::marker::share(log) };
+    let err = unsafe { rok::core::marker::share(log2) };
     let argv: List<str> = List::new();
     for w in words(cfg.wrap) { argv.push(w); }
     argv.push(cfg.rokc);
@@ -306,7 +311,15 @@ fn run_tool(cfg: Cfg, dir: str, args: List<str>, secs: u64, what: str) -> bool |
         .env("PATH", "/usr/bin:/bin").env("HOME", dir).env("TMPDIR", dir).env("ROK_HOME", dir + "/.rok")
         .env("XDG_CACHE_HOME", dir + "/.cache").env("NO_COLOR", "1").env("ROK_INCREMENTAL", "0")
         .stdin(Stdio::Null).stdout(Stdio::File(log)).stderr(Stdio::File(log2)).kill_on_drop(true);
-    let child = try cmd.spawn() catch e { return text(500, f"cannot start rokc: {e}"); };
+    // The child gets its own copies of the log; the command owns ours but
+    // never closes them, so close them here or each job leaks two fds.
+    let child = try cmd.spawn() catch e {
+        try out.close() catch _ {};
+        try err.close() catch _ {};
+        return text(500, f"cannot start rokc: {e}");
+    };
+    try out.close() catch _ {};
+    try err.close() catch _ {};
     let t0 = Instant::now();
     let limit = (secs as i64) * 1000i64;
     loop {
