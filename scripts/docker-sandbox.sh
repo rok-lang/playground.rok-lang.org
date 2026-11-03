@@ -8,8 +8,8 @@
 # directory is the only writable mount, there is no network, the root is
 # read-only, and Docker's cgroup caps memory (so the container, not the
 # host, is OOM-killed) and CPUs. No IPC namespace, a capped open-file
-# count, and a small no-exec /tmp. Build the image first (scripts/Dockerfile). Set PLAY_IMAGE,
-# PLAY_MEM, PLAY_CPUS to override.
+# count, and a small no-exec /tmp. Build the image first
+# (scripts/Dockerfile). PLAY_IMAGE, PLAY_MEM, PLAY_CPUS override.
 set -eu
 
 [ $# -ge 1 ] || { echo "usage: docker-sandbox.sh <rokc> <args..>" >&2; exit 2; }

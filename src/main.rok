@@ -22,10 +22,10 @@
 //
 // Each compile runs `rokc build --target=wasm32-unknown-unknown` in a
 // fresh directory with a clean environment, under PLAY_WRAP (a sandbox
-// command line such as bwrap's, see README.md), killed after
-// PLAY_TIMEOUT seconds; `rokc fmt` the same way, under FMT_TIMEOUT.
-// Finished modules are cached by the SHA-256 of
-// level and source, so a shared link compiles once.
+// command line such as bwrap's), killed after PLAY_TIMEOUT seconds;
+// `rokc fmt` the same way, under FMT_TIMEOUT. Finished modules are
+// cached by the SHA-256 of level and source, so a shared link compiles
+// once.
 //
 // Settings come from the environment:
 //   PLAY_ADDR     127.0.0.1:8405    PLAY_ROKC    rokc
@@ -469,8 +469,8 @@ fn file_resp(path: str) -> Resp | none {
     Resp { status: 200, headers: [f"Content-Type: {http::content_type(path)}", "Cache-Control: no-cache", CSP], body: data }
 }
 
-/// A file of the web kit, by its public path. `/theme-init.js` is the
-/// name theme.js had here before the kit; cached pages still ask for it.
+/// A file of the web kit, by its public path. `/theme-init.js` is
+/// theme.js under its old name, which cached pages still ask for.
 fn kit_resp(path: str) -> Resp | none {
     let name = if path == "/theme-init.js" { "theme.js" } else { path[1:] };
     let f = kit::find(kit::Mark::Rok, name) ?? { return none; };

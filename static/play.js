@@ -283,7 +283,7 @@ function editAction(v, s, e, key, shift) {
 }
 
 // Tab indents, so Escape first hands the next Tab back to the browser
-// and keyboard users can leave the editor (WCAG 2.1.2).
+// and keyboard users can leave the editor (no keyboard trap).
 let escaped = false;
 ed.addEventListener("blur", () => { escaped = false; });
 ed.addEventListener("keydown", (ev) => {

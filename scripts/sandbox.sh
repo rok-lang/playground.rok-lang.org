@@ -5,11 +5,12 @@
 #
 # rokc can read any file it can reach at compile time (include_bytes!,
 # #[path], WIT) and put it in the module it writes, so it sees only the
-# job directory (writable), its toolchain and /usr (read-only), and a
-# fresh /proc and a /dev with only null: no /etc, no home directories, no network, no
-# other processes. Limits: 16 GiB of address space (rokc reserves a 1 GiB
-# stack and LLVM's threads; cap real memory with a cgroup, README.md), 60 s of CPU, 64 MiB
-# per file written; the server's PLAY_TIMEOUT kills it before that.
+# job directory (writable), its toolchain and /usr (read-only), a fresh
+# /proc and a /dev with only null: no /etc, no home directories, no
+# network, no other processes. Limits: 16 GiB of address space (rokc
+# reserves a 1 GiB stack and LLVM's threads; cap real memory with a
+# cgroup), 60 s of CPU, 64 MiB per file written; the server's
+# PLAY_TIMEOUT kills it before that.
 # Needs bubblewrap and util-linux's prlimit. PLAY_ROKC must be the
 # toolchain's own rokc (not the ~/.rok/bin proxy), so its lib/ is bound.
 set -eu
