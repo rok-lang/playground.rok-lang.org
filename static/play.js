@@ -44,11 +44,12 @@ function resize(el, change) {
   el.rz = el.animate([from, to], { duration: 200, easing: "cubic-bezier(.2,0,0,1)" });
 }
 
-// Highlighting, with the classes of rok-syntax: k t s n c a.
+// Highlighting with rok-syntax's classes (k t s n c a). KEYWORDS is a
+// hand-kept subset of its grammars/keywords.rokon.
 
 const KEYWORDS = new Set(("fn let mut if else match for in while loop return break continue struct enum trait impl " +
   "pub use mod const static type as is none true false throws try catch async await yield self Self where ref " +
-  "unsafe extern defer using move dyn any super crate").split(" "));
+  "unsafe extern defer using move dyn any throw finally rethrows union some pkg sub sup macro gen do").split(" "));
 const PRIMS = new Set("i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64 bool char str".split(" "));
 const TOKEN = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|(f?"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)')|(#!?\[[^\]\n]*\]?)|(\b\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?(?:[iu](?:8|16|32|64|128|size)|f32|f64)?\b|\b0x[\da-fA-F_]+\b)|([A-Za-z_][A-Za-z0-9_]*)/g;
 

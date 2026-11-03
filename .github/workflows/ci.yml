@@ -1,5 +1,5 @@
 # Build and test the compile server on every push. It does not deploy:
-# deploying is deploy/deploy.sh against a Terraform-made box, run by hand.
+# deploy.yml does, on the release branch.
 name: ci
 
 on:
@@ -28,9 +28,4 @@ jobs:
       - name: Test
         run: rok test
 
-      # The wasm32 runtime ships with the toolchain, so the sandbox image
-      # builds from it. Build it to catch Dockerfile breakage.
-      - name: Build the sandbox image
-        run: |
-          tc=$(rokc --print sysroot 2>/dev/null || echo "$HOME/.rok/toolchains")
-          echo "sandbox image build is exercised on deploy (deploy/deploy.sh)"
+      # The sandbox image (scripts/Dockerfile) is built on deploy.

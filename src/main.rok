@@ -1,6 +1,6 @@
 // playground.rok-lang.org: the page and its compile service.
 //
-//   POST /api/compile?opt=0|2   body: one rok source file (UTF-8, at most
+//   POST /api/compile?opt=0|2   body: one Rok source file (UTF-8, at most
 //                               64 KiB). 200: the program as a
 //                               wasm32-unknown-unknown module, or rokc's
 //                               diagnostics as text with an
@@ -215,7 +215,6 @@ fn allow(client: str, rate: i64) -> bool {
     }
 }
 
-/// The client: the proxy's X-Forwarded-For (its first address) or the peer.
 /// The client for rate limiting. Without a trusted-proxy header the TCP
 /// peer is used, so a client cannot forge its identity; a direct client's
 /// own X-Forwarded-For is ignored. With one (PLAY_CLIENT_HEADER), its
