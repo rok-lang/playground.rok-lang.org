@@ -15,7 +15,7 @@ fn main() {
     let names = ["ada", "grace", "linus"];
     println(f"grace at {find(names, "grace") ?? 99}");
     println(f"guido at {find(names, "guido") ?? 99}");
-    if let i: usize = find(names, "linus") {
+    if let i = find(names, "linus") {
         println(f"found linus at {i}");
     }
 }

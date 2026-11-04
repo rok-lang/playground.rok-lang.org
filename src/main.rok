@@ -1,6 +1,6 @@
 // playground.rok-lang.org: the page and its compile service.
 //
-//   POST /api/compile?opt=0|2   body: one rok source file (UTF-8, at most
+//   POST /api/compile?opt=0|2   body: one Rok source file (UTF-8, at most
 //                               64 KiB). 200: the program as a
 //                               wasm32-unknown-unknown module, or rokc's
 //                               diagnostics as text with an
@@ -22,10 +22,10 @@
 //
 // Each compile runs `rokc build --target=wasm32-unknown-unknown` in a
 // fresh directory with a clean environment, under PLAY_WRAP (a sandbox
-// command line such as bwrap's, see README.md), killed after
-// PLAY_TIMEOUT seconds; `rokc fmt` the same way, under FMT_TIMEOUT.
-// Finished modules are cached by the SHA-256 of
-// level and source, so a shared link compiles once.
+// command line such as bwrap's), killed after PLAY_TIMEOUT seconds;
+// `rokc fmt` the same way, under FMT_TIMEOUT. Finished modules are
+// cached by the SHA-256 of level and source, so a shared link compiles
+// once.
 //
 // Settings come from the environment:
 //   PLAY_ADDR     127.0.0.1:8405    PLAY_ROKC    rokc
@@ -50,10 +50,8 @@ use rok::std::net;
 use rok::std::net::TcpStream;
 use rok::std::process::{Command, Stdio};
 use rok::std::thread;
-use rok::std::time::Duration;
 use rok::core::crypto::HashAlgorithm;
 use rok::std::time::SystemTime;
-use rok::core::task::time::Instant;
 use web::chrome;
 use web::http;
 use web::http::Request;
@@ -157,8 +155,6 @@ fn bytes_of(s: str) -> List<u8> {
     b
 }
 
-// ---- answers ----
-
 struct Resp {
     status: i32;
     headers: List<str>;
@@ -187,8 +183,7 @@ fn hex(bytes: List<u8>) -> str {
     out.to_str()
 }
 
-// ---- rate limit: per client, a window of one minute ----
-
+/// A client's requests in its current one-minute window.
 struct Window {
     start: i64;
     count: i64;
@@ -196,7 +191,7 @@ struct Window {
 
 static CLIENTS: Mutex<Dict<str, Window>> = Mutex::new(Dict::new());
 
-fn now_secs() -> i64 { try SystemTime::now().unix_seconds() catch _ { 0i64 } }
+fn now_secs() -> i64 { SystemTime::now().unix_secs() }
 
 fn allow(client: str, rate: i64) -> bool {
     using g = CLIENTS.lock() {
@@ -206,7 +201,7 @@ fn allow(client: str, rate: i64) -> bool {
         // without resetting everyone (which an attacker could force).
         if d.len() > 2048 {
             let keep: Dict<str, Window> = Dict::new();
-            for (k, w) in d.entries() {
+            for (k, w) in d.iter() {
                 if t - w.start < 60i64 { keep.insert(k, w); }
             }
             d = keep;
@@ -220,7 +215,6 @@ fn allow(client: str, rate: i64) -> bool {
     }
 }
 
-/// The client: the proxy's X-Forwarded-For (its first address) or the peer.
 /// The client for rate limiting. Without a trusted-proxy header the TCP
 /// peer is used, so a client cannot forge its identity; a direct client's
 /// own X-Forwarded-For is ignored. With one (PLAY_CLIENT_HEADER), its
@@ -239,15 +233,13 @@ fn client_of(s: TcpStream, r: Request, header: str) -> str {
     if let k: usize = t.rfind(":") { t[:k] } else { t }
 }
 
-// ---- compiling ----
-
 /// What the playground does not compile: reading files at compile time
-/// (`include_str!`, `include_bytes!`, `#[path]`, WIT imports) and raw
-/// MLIR. The sandbox is what keeps the server's files out of reach; this
-/// only says so plainly.
+/// (`include_str!`, `include_bytes!`, `#[path]`, WIT imports). The
+/// sandbox is what keeps the server's files out of reach; this only says
+/// so plainly.
 fn refused(src: str) -> str | none {
     for (word, what) in [("include_str", "include_str!"), ("include_bytes", "include_bytes!"), ("#[path", "#[path(..)]"),
-        ("wit::import", "WIT imports"), ("wit::export", "WIT exports"), ("__mlir_op", "__mlir_op"), ("__mlir_attr", "__mlir_attr")] {
+        ("wit::import", "WIT imports"), ("wit::export", "WIT exports")] {
             if src.contains(word) {
                 return f"error: the playground does not compile {what}: a program here is one file and reads nothing at compile time\n";
             }
@@ -297,6 +289,10 @@ fn run_rokc(cfg: Cfg, src: str, opt: str, key: str) -> Resp {
 /// run or took longer than `secs`.
 fn run_tool(cfg: Cfg, dir: str, args: List<str>, secs: u64, what: str) -> bool | Resp {
     let log = try fs::create(dir + "/rokc.log") catch e { return text(500, f"work directory: {e}"); };
+    let log2 = try log.try_clone() catch e {
+        try log.close() catch _ {};
+        return text(500, f"work directory: {e}");
+    };
     let argv: List<str> = List::new();
     for w in words(cfg.wrap) { argv.push(w); }
     argv.push(cfg.rokc);
@@ -306,7 +302,8 @@ fn run_tool(cfg: Cfg, dir: str, args: List<str>, secs: u64, what: str) -> bool |
     let cmd = Command::new(argv[0]).args(argv[1:argv.len()].to_list()).current_dir(dir).env_clear()
         .env("PATH", "/usr/bin:/bin").env("HOME", dir).env("TMPDIR", dir).env("ROK_HOME", dir + "/.rok")
         .env("XDG_CACHE_HOME", dir + "/.cache").env("NO_COLOR", "1").env("ROK_INCREMENTAL", "0")
-        .stdin(Stdio::Null).stdout(Stdio::File(log)).stderr(Stdio::File(log)).kill_on_drop(true);
+        .stdin(Stdio::Null).stdout(Stdio::File(log)).stderr(Stdio::File(log2)).kill_on_drop(true);
+    // The command owns both log files and closes them once spawned.
     let child = try cmd.spawn() catch e { return text(500, f"cannot start rokc: {e}"); };
     let t0 = Instant::now();
     let limit = (secs as i64) * 1000i64;
@@ -340,7 +337,7 @@ fn build_in(cfg: Cfg, src: str, opt: str, key: str, dir: str) -> Resp {
     let wasm = try fs::read(dir + "/main.wasm") catch e { return text(500, f"rokc output: {e}"); };
     try fs::create_dir_all(cfg.work + "/cache") catch _ {};
     let n = 0usize;
-    for _ in try fs::read_dir(cfg.work + "/cache") catch _ { return text(500, "cache directory"); } { n += 1; }
+    for _ in (try fs::read_dir(cfg.work + "/cache") catch _ { return text(500, "cache directory"); }).results() { n += 1; }
     if n >= MAX_CACHED { try fs::remove_dir_all(cfg.work + "/cache") catch _ {}; try fs::create_dir_all(cfg.work + "/cache") catch _ {}; }
     try fs::rename(dir + "/main.wasm", cfg.work + "/cache/" + key + ".wasm") catch _ {};
     Resp { status: 200, headers: ["Content-Type: application/wasm", "Cache-Control: no-store", "X-Rok-Cache: miss"], body: wasm }
@@ -381,10 +378,9 @@ fn format_in(cfg: Cfg, src: str, dir: str) -> Resp {
     text(200, out)
 }
 
-// ---- share links: the source in a file named by its hash ----
-
-/// The id of `src`: the first 50 bits of its SHA-256 in base32, so the
-/// same code is always the same link.
+/// The id of `src`, and the name of the file a share link stores it in:
+/// the first 50 bits of its SHA-256 in base32, so the same code is
+/// always the same link.
 fn share_id(src: str) -> str {
     let d = HashAlgorithm::Sha256.digest(src.as_bytes());
     let v = 0u64;
@@ -441,7 +437,7 @@ fn shared(cfg: Cfg, id: str) -> str | none {
 
 fn count_shares(dir: str) -> i64 {
     let n = 0i64;
-    for e in try fs::read_dir(dir) catch _ { return 0i64; } {
+    for e in (try fs::read_dir(dir) catch _ { return 0i64; }).results() {
         let ent = try e.get() catch _ { continue; };
         if ent.file_name().ends_with(".rok") { n += 1i64; }
     }
@@ -460,8 +456,6 @@ fn shared_page(cfg: Cfg, src: str) -> Resp | none {
     r
 }
 
-// ---- routes ----
-
 /// The page's own headers: scripts and workers from here only (and the
 /// Cloudflare Web Analytics beacon the proxy injects), wasm compiled from
 /// what the API returns, fonts from here (the kit's). Style
@@ -475,8 +469,8 @@ fn file_resp(path: str) -> Resp | none {
     Resp { status: 200, headers: [f"Content-Type: {http::content_type(path)}", "Cache-Control: no-cache", CSP, http::REPORTING], body: data }
 }
 
-/// A file of the web kit, by its public path. `/theme-init.js` is the
-/// name theme.js had here before the kit; cached pages still ask for it.
+/// A file of the web kit, by its public path. `/theme-init.js` is
+/// theme.js under its old name, which cached pages still ask for.
 fn kit_resp(path: str) -> Resp | none {
     let name = if path == "/theme-init.js" { "theme.js" } else { path[1:] };
     let f = kit::find(kit::Mark::Rok, name) ?? { return none; };
@@ -619,13 +613,13 @@ fn handle(s: TcpStream, cfg: Cfg) {
     let t0 = Instant::now();
     let r = try http::read_request(s, MAX_SOURCE, Duration::secs(10)) catch e {
         try http::send(s, e.status, ["Content-Type: text/plain; charset=utf-8"], e.msg + "\n", false) catch _ {};
-        s.close();
+        try s.close() catch _ {};
         return;
     };
     let resp = route(cfg, s, r);
     // http::send writes a 304 without a body or Content-Length.
     try http::send(s, resp.status, resp.headers, resp.body, r.method == "HEAD") catch _ {};
-    s.close();
+    try s.close() catch _ {};
     eprintln(f"{r.method} {r.path} {resp.status} {resp.body.len()}B {t0.elapsed().as_ms()}ms");
 }
 
@@ -646,7 +640,7 @@ fn main() throws {
     }
     using l = try net::tcp_listen(cfg.addr) {
         eprintln(f"playground on http://{cfg.addr}, compiling with {cfg.rokc} ({cfg.jobs} at a time, {cfg.timeout} s each)");
-        for c in l.incoming() {
+        for c in l.incoming().results() {
             let s = try c.get() catch e {
                 eprintln(f"accept: {e}");
                 continue;
@@ -654,7 +648,7 @@ fn main() throws {
             if ACTIVE.fetch_add(1i64) >= MAX_CONNS {
                 ACTIVE.fetch_sub(1i64);
                 try http::send(s, 503, ["Content-Type: text/plain; charset=utf-8"], "busy\n", false) catch _ {};
-                s.close();
+                try s.close() catch _ {};
                 continue;
             }
             let t = thread::spawn(|| {
