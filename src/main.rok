@@ -15,6 +15,7 @@
 //                               run here); 400 / 409 / 413 / 429 / 503.
 //   GET  /api/share/<id>        the stored source, or 404
 //   GET  /p/<id>                the page with that source in the editor
+//   GET  /healthz               `ok` and the toolchain release
 //   GET  /...                   static/, then the web kit's files
 //                               (web/, built in) and its fonts
 //                               (/fonts/, web/assets/fonts), then
@@ -579,6 +580,7 @@ fn route(cfg: Cfg, s: TcpStream, r: Request) -> Resp {
         return share(cfg, r.body);
     }
     if r.method != "GET" && r.method != "HEAD" { return text(405, "Only GET here."); }
+    if p == "/healthz" { return text(200, f"ok\nrelease {cfg.release}"); }
     if p.starts_with("/api/share/") {
         let src = shared(cfg, p["/api/share/".len():]) ?? { return text(404, "No such link."); };
         return text(200, src);

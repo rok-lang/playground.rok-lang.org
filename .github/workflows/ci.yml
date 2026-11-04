@@ -16,10 +16,17 @@ jobs:
         with:
           submodules: recursive
 
-      # The latest rok release, the one the deploy builds and serves with.
+      # The newest release of the series rok.rokon pins, as the deploy.
       - name: Install rok
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL https://rok-lang.org/install.sh | ROK_NO_MODIFY_PATH=1 sh -s -- -q
+          pin=$(sed -n 's/^ *toolchain: *"\([0-9.]*\)",*$/\1/p' rok.rokon | sed 's/\./\\./g')
+          [ -n "$pin" ] || { echo 'rok.rokon pins no toolchain; add toolchain: "0.2"' >&2; exit 1; }
+          v=$(gh release list -R rok-lang/rok --exclude-drafts --exclude-pre-releases -L 100 --json tagName -q '.[].tagName' |
+            sed -n "s/^v\($pin\(\.[0-9][0-9]*\)*\)$/\1/p" | sort -V | tail -n1)
+          [ -n "$v" ] || { echo "no rok release in the pinned series" >&2; exit 1; }
+          curl -fsSL "https://raw.githubusercontent.com/rok-lang/rok/v$v/install.sh" | ROK_NO_MODIFY_PATH=1 sh -s -- -q --version "$v"
           echo "$HOME/.rok/bin" >> "$GITHUB_PATH"
 
       - name: Build
